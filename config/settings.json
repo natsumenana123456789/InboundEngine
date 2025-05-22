@@ -36,5 +36,30 @@
     "enabled": true,
     "folder_id": "1X0pnCD4Vz5KIrZX81-0PLC-YwWvu4LDD"
   },
-  "file_paths": {}
+  "google_sheets": {
+    "sheet_name": "投稿DB群",
+    "worksheet_name": "投稿データ",
+    "columns": [
+      "ID",
+      "投稿日時",
+      "本文",
+      "画像/動画URL",
+      "投稿者",
+      "取得日時",
+      "ステータス"
+    ],
+    "batch_size": 100
+  },
+  "scheduler": {
+    "script_name": "run_posting_sheet.sh",
+    "plist_dir": "~/Library/LaunchAgents",
+    "label_prefix": "com.auto_post_sheet",
+    "base_time": "09:00",
+    "mean_interval_min": 90,
+    "jitter_min": 15
+  },
+  "file_paths": {
+    "google_key_file": "gspread-key.json",
+    "main_config_file": "settings.json"
+  }
 }

@@ -149,7 +149,7 @@ logs/
 
 # Old files if still present at root - these should ideally be cleaned up
 # but added here for safety if they reappear before cleanup.
-chrome_profiles/
+# chrome_profiles/
 twitter_cookies.json
 
 # pyenv
@@ -174,5 +174,5 @@ docker/chrome_profiles/
 .idea/
 
 # Additional project-specific rules can be added here 
-curate_bot/chrome_profile/ 
+bots/curate_bot/chrome_profile/
 config/venv/ 

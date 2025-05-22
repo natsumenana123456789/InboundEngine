@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from typing import List, Dict, Optional
 from .notion_writer import NotionWriter
+from .ocr_utils import ocr_images_from_urls
 
 class TweetProcessor:
     def __init__(self, config):
@@ -46,20 +47,31 @@ class TweetProcessor:
 
                 # データの保存
                 if self.notion_writer:
-                    media_to_write = None
-                    if tweet.get("media_urls"):
-                        # Take the first URL from the list for the Notion URL property
-                        media_to_write = tweet["media_urls"][0]
+                    media_urls_for_notion = tweet.get("media_urls", [])
                     
-                    success = self.notion_writer.add_post({
+                    # OCR処理の実行
+                    ocr_text_result = None
+                    if media_urls_for_notion:
+                        print(f"🖼️ 画像のOCR処理を開始します: {media_urls_for_notion}")
+                        ocr_text_result = ocr_images_from_urls(media_urls_for_notion)
+                        if ocr_text_result:
+                            print(f"📄 OCR結果あり: {ocr_text_result[:100]}...")
+                        else:
+                            print("📄 OCR結果なし、またはエラーが発生しました。")
+                    
+                    post_data_for_notion = {
                         "ID": tweet["id"],
                         "投稿日時": tweet.get("created_at", ""),
                         "本文": tweet.get("text", ""),
-                        "画像/動画URL": media_to_write, # Pass the single URL string
+                        "画像/動画URL": media_urls_for_notion,
                         "投稿者": tweet.get("username", ""),
                         "取得日時": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-                        "ステータス": "新規"
-                    })
+                        "ステータス": "新規",
+                        "OCRテキスト": ocr_text_result
+                    }
+                    
+                    success = self.notion_writer.add_post(post_data_for_notion)
+
                     if success:
                         results["success"] += 1
                     else:

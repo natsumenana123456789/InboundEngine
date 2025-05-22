@@ -1,9 +1,11 @@
 import argparse
-import json
+import json # このjsonインポートは不要になる可能性あり
 import logging
 import os # os.path を使うために追加
 from .tweet_scraper import TweetScraper
 from .tweet_processor import TweetProcessor
+# config_loaderをインポート (パスを修正)
+from ...config import config_loader # ルートのconfigディレクトリからインポート (bots/ の分、ドットを1つ増やす)
 
 # ログ設定
 # Dockerのログパスを考慮しつつ、ローカル実行も考慮してパスを調整
@@ -18,20 +20,13 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(message)s'
 )
 
-# 設定ファイルのパスを固定
-CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'settings.json')
-
-def load_config():
-    """設定ファイルを読み込む"""
-    if not os.path.exists(CONFIG_FILE_PATH):
-        logging.error(f"❌ 設定ファイルが見つかりません: {CONFIG_FILE_PATH}")
-        return None
-    with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+# 設定ファイルのパス指定は不要になる
+# CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'settings.json')
 
 def main():
-    config = load_config()
-    if not config:
+    # config_loaderから設定を読み込む
+    config = config_loader.load_config()
+    if not config: # config_loaderが空の辞書を返す場合も考慮
         logging.error("❌ 設定の読み込みに失敗しました。処理を終了します。")
         return
 
