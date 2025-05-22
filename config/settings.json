@@ -1,0 +1,40 @@
+{
+  "twitter_account": {
+    "email": "jptmarketing.takahashi@gmail.com",
+    "username": "jadiAngkat",
+    "password": "Wm3hMCUT"
+  },
+  "scraping": {
+    "extract_target": "YahooNewsTopics",
+    "max_tweets": 30,
+    "mode": "target_only",
+    "save_media": true,
+    "ocr_enabled": true,
+    "use_gpt": true
+  },
+  "notion": {
+    "token": "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",
+    "databases": {
+      "curation": "1fb42232-5cdd-8142-99da-de509fa60a5c",
+      "questions": "your_database_id"
+    },
+    "parent_page_id": "1fa422325cdd80088744f2d3faf29df6"
+  },
+  "posting": {
+    "char_limit": {
+      "min": 135,
+      "max": 150
+    },
+    "video_file_name": "temp_video.mp4",
+    "user_agents": [
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+    ]
+  },
+  "google_drive": {
+    "enabled": true,
+    "folder_id": "1X0pnCD4Vz5KIrZX81-0PLC-YwWvu4LDD"
+  },
+  "file_paths": {}
+}

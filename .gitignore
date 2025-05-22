@@ -1,0 +1,178 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib60/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a script, but they do not need to be.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# PEP 582; __pypackages__
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyderworkspace
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Our own cache directory
+.cache/
+
+# Sensitive configuration files
+config/gspread-key.json
+config/oauth_credentials.json
+config/token.json
+
+# Temporary video files (if applicable, adjust path if needed)
+auto_post_bot/temp_video.mp4
+temp_video.mp4
+
+# Error HTMLs
+error_html/
+
+# Log files
+# Already covered by Django stuff, but being explicit
+# *.log
+logs/
+
+# Old files if still present at root - these should ideally be cleaned up
+# but added here for safety if they reappear before cleanup.
+chrome_profiles/
+twitter_cookies.json
+
+# pyenv
+.python-version
+
+# GCS Service Account Key (Project specific)
+gcs-service-account-key.json # Default name, adjust if different
+*.json # More general rule if key files might have various names, but be careful not to ignore other needed json files.
+# If your key is in a specific directory, e.g., .secrets/gcs-key.json, use that path:
+# .secrets/
+
+# Cache and Log directories (Project specific)
+**/logs/
+**/downloaded_images/
+**/temp_images/
+
+# Docker specific
+docker/chrome_profiles/
+
+# IDE settings folders
+.vscode/
+.idea/
+
+# Additional project-specific rules can be added here 
+curate_bot/chrome_profile/ 
+config/venv/ 

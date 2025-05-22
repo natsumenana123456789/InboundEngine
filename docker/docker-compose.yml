@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  auto_post_bot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    volumes:
+      - ../chrome_profiles:/app/chrome_profiles
+      - ../auto_post_bot/accounts.json:/app/auto_post_bot/accounts.json
+      - ../auto_post_bot/gspread-key.json:/app/auto_post_bot/gspread-key.json
+    environment:
+      - TZ=Asia/Tokyo
+    restart: unless-stopped
+
+  curate_bot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: python /app/curate_bot/main.py --target YahooNewsTopics
+    volumes:
+      - ../curate_bot:/app/curate_bot
+      - ../config:/app/config
+      - ../curate_bot/logs:/app/curate_bot/logs
+      - ../.cache:/app/.cache
+    environment:
+      - TZ=Asia/Tokyo
+    restart: "no"

@@ -1,0 +1,46 @@
+{
+    "default": {
+      "email": "jptmarketing.takahashi@gmail.com",
+      "username": "jadiAngkat",
+      "password": "Wm3hMCUT",
+      "TWITTER_USERNAME": "jadiAngkat",
+      "SHEET_NAME": "投稿DB群",
+      "posting": {
+        "char_limit": {
+          "min": 135,
+          "max": 150
+        },
+        "video_file_name": "temp_video.mp4",
+        "user_agents": [
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        ]
+      },
+      "scheduler": {
+        "script_name": "run_posting_sheet.sh",
+        "plist_dir": "~/Library/LaunchAgents",
+        "label_prefix": "com.auto_post_sheet",
+        "base_time": "09:00",
+        "mean_interval_min": 90,
+        "jitter_min": 15
+      },
+      "files": {
+        "google_key_file": "gspread-key.json",
+        "config_file": "accounts.json"
+      },
+      "sheets": {
+        "worksheet_name": "投稿データ",
+        "columns": [
+          "ID",
+          "投稿日時",
+          "本文",
+          "画像/動画URL",
+          "投稿者",
+          "取得日時",
+          "ステータス"
+        ],
+        "batch_size": 100
+      }
+    }
+  } 
