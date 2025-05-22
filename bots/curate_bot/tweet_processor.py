@@ -5,94 +5,99 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from .notion_writer import NotionWriter
 from .ocr_utils import ocr_images_from_urls
+from ...utils.logger import setup_logger
+# import logging # loggerを引数で受け取る
 
 class TweetProcessor:
-    def __init__(self, config):
-        self.config = config
-        self.notion_config = config.get("notion", {})
-        self.notion_writer = None
-        self.registered_ids_map = {}
+    def __init__(self, bot_config, parent_logger=None):
+        self.bot_config = bot_config
+        self.logger = parent_logger if parent_logger else setup_logger(log_dir_name='bots/curate_bot/logs', logger_name='TweetProcessor_default')
+        
+        self.notion_config = self.bot_config.get("notion", {})
+        self.gdrive_config = self.bot_config.get("google_drive", {})
+        self.scraping_config = self.bot_config.get("scraping", {})
+
+        # NotionWriter に bot_config を渡して初期化
+        self.notion_writer = NotionWriter(self.bot_config, self.logger)
+        self.processed_tweet_ids_cache = set() # 処理済みIDのキャッシュ (NotionWriterと共有も検討)
 
     def setup_notion(self):
-        """Notionライターの設定"""
-        notion_token = self.notion_config.get("token")
-        database_id = self.notion_config.get("databases", {}).get("curation")
-        if not notion_token or not database_id:
-            print("⚠️ NotionのトークンまたはデータベースIDが設定されていません。Notionへの保存はスキップされます。")
-            self.notion_writer = None
-            return None
-        self.notion_writer = NotionWriter(notion_token, database_id)
-        return self.notion_writer
+        """NotionクライアントのセットアップやDBスキーマの確認・更新を行う"""
+        try:
+            # NotionWriterの初期化時にスキーマ更新が行われる場合があるため、ここでは呼び出しのみ
+            self.notion_writer.ensure_database_schema() # スキーマ保証メソッドを呼び出す
+            self.logger.info("✅ Notionセットアップ完了 (スキーマ確認含む)")
+            # 処理済みIDをNotionからロードする (NotionWriterが担当しても良い)
+            self.processed_tweet_ids_cache = self.notion_writer.load_processed_tweet_ids()
+            self.logger.info(f"Notionから {len(self.processed_tweet_ids_cache)} 件の処理済みツイートIDをロードしました。")
+        except Exception as e:
+            self.logger.error(f"❌ Notionのセットアップ中にエラー: {e}", exc_info=True)
+            # 必要であればここでプログラムを停止させるか、エラー処理を行う
+            raise
 
-    def process_tweets(self, tweets: List[Dict], target_count: int) -> Dict[str, int]:
-        """ツイートの処理と保存"""
-        results = {
-            "success": 0,
-            "failed": 0,
-            "skipped": 0,
-            "duplicated": 0
-        }
+    def process_tweets(self, tweets_data, max_tweets_to_process):
+        if not self.notion_writer or not self.notion_writer.is_client_initialized():
+            self.logger.error("❌ Notionクライアントが初期化されていません。処理を中止します。")
+            # self.setup_notion() # 再度セットアップを試みるか、エラーを投げる
+            raise RuntimeError("Notionクライアントが初期化されていません。")
 
-        for tweet in tweets:
-            try:
-                # 重複チェック
-                if self._is_duplicate(tweet["id"]):
-                    results["duplicated"] += 1
-                    continue
+        results = {"success": 0, "failed": 0, "skipped": 0, "duplicated": 0}
+        processed_count_in_current_run = 0
 
-                # 広告チェック
-                if self._is_ad_post(tweet.get("text", "")):
-                    results["skipped"] += 1
-                    continue
+        for tweet in tweets_data:
+            if processed_count_in_current_run >= max_tweets_to_process:
+                self.logger.info(f"今回の実行での処理上限 ({max_tweets_to_process}件) に達しました。")
+                break
 
-                # データの保存
-                if self.notion_writer:
-                    media_urls_for_notion = tweet.get("media_urls", [])
-                    
-                    # OCR処理の実行
-                    ocr_text_result = None
-                    if media_urls_for_notion:
-                        print(f"🖼️ 画像のOCR処理を開始します: {media_urls_for_notion}")
-                        ocr_text_result = ocr_images_from_urls(media_urls_for_notion)
-                        if ocr_text_result:
-                            print(f"📄 OCR結果あり: {ocr_text_result[:100]}...")
-                        else:
-                            print("📄 OCR結果なし、またはエラーが発生しました。")
-                    
-                    post_data_for_notion = {
-                        "ID": tweet["id"],
-                        "投稿日時": tweet.get("created_at", ""),
-                        "本文": tweet.get("text", ""),
-                        "画像/動画URL": media_urls_for_notion,
-                        "投稿者": tweet.get("username", ""),
-                        "取得日時": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-                        "ステータス": "新規",
-                        "OCRテキスト": ocr_text_result
-                    }
-                    
-                    success = self.notion_writer.add_post(post_data_for_notion)
-
-                    if success:
-                        results["success"] += 1
-                    else:
-                        results["failed"] += 1
-
-                # 目標数に達したら終了
-                if results["success"] >= target_count:
-                    break
-
-            except Exception as e:
-                print(f"⚠️ ツイート処理中にエラー: {str(e)}")
-                results["failed"] += 1
+            tweet_id = tweet.get("id")
+            if not tweet_id:
+                self.logger.warning("IDがないツイートデータはスキップします。")
+                results["skipped"] += 1
                 continue
 
+            if tweet_id in self.processed_tweet_ids_cache:
+                self.logger.info(f"重複ツイート: {tweet_id} は既に処理済みです。スキップします。")
+                results["duplicated"] += 1
+                continue
+            
+            ocr_text_results = []
+            if self.scraping_config.get("ocr_enabled", False) and tweet.get("media_urls"):
+                self.logger.info(f"OCR処理を開始します (ツイートID: {tweet_id})。メディア数: {len(tweet.get('media_urls'))}")
+                try:
+                    # ocr_images_from_urls は bot_config を必要としない想定 (ロガーは渡す)
+                    ocr_text_results = ocr_images_from_urls(tweet.get("media_urls", []), self.logger)
+                    self.logger.info(f"OCR結果 (ツイートID: {tweet_id}): {len(ocr_text_results)}件のテキスト抽出")
+                except Exception as e_ocr:
+                    self.logger.error(f"❌ OCR処理中にエラーが発生しました (ツイートID: {tweet_id}): {e_ocr}", exc_info=True)
+                    # OCRエラーは処理継続、テキストは空になる
+            
+            # OCR結果を結合して1つの文字列にする (Notionの1プロパティに保存するため)
+            final_ocr_text = "\n\n---\n\n".join(ocr_text_results).strip() if ocr_text_results else None
+
+            try:
+                self.notion_writer.add_post(
+                    tweet_id=tweet_id,
+                    text=tweet.get("text", ""),
+                    user=tweet.get("user", "unknown"),
+                    tweet_url=tweet.get("url", ""),
+                    media_urls=tweet.get("media_urls", []),
+                    created_at_str=tweet.get("created_at"), # created_atは文字列で渡される想定
+                    ocr_text=final_ocr_text
+                )
+                self.processed_tweet_ids_cache.add(tweet_id) # 正常処理後にキャッシュに追加
+                results["success"] += 1
+                processed_count_in_current_run += 1
+                self.logger.info(f"✅ ツイート {tweet_id} をNotionに正常に投稿しました。OCRテキスト長: {len(final_ocr_text) if final_ocr_text else 0}")
+            except Exception as e:
+                self.logger.error(f"❌ ツイート {tweet_id} のNotionへの投稿中にエラー: {e}", exc_info=True)
+                results["failed"] += 1
+        
         return results
 
     def _is_duplicate(self, tweet_id: str) -> bool:
         """重複チェック"""
-        if tweet_id in self.registered_ids_map:
+        if tweet_id in self.processed_tweet_ids_cache:
             return True
-        self.registered_ids_map[tweet_id] = True
         return False
 
     def _is_ad_post(self, text: str) -> bool:
@@ -111,4 +116,5 @@ class TweetProcessor:
     def cleanup(self):
         """リソースのクリーンアップ"""
         if self.notion_writer:
+            self.logger.info("🧹 TweetProcessorのクリーンアップを実行します。")
             self.notion_writer = None 

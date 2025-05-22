@@ -175,4 +175,6 @@ docker/chrome_profiles/
 
 # Additional project-specific rules can be added here 
 bots/curate_bot/chrome_profile/
-config/venv/ 
+config/venv/
+chrome_profiles/
+.cache/chrome_profiles_test/ 

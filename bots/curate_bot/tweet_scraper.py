@@ -1,18 +1,18 @@
 import os
 import re
-import cv2
+# import cv2 # ocr_image 内で import numpy as np, cv2 されているので不要かも
 import time
 import json
 import shutil
 import requests
 import pytesseract
-import logging
+# import logging # logger をコンストラクタで受け取るので不要
 from datetime import datetime
 from PIL import Image, ImageFilter, ImageEnhance
-from selenium import webdriver
+# from selenium import webdriver # webdriver_utils に移行
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
+# from selenium.webdriver.chrome.options import Options # webdriver_utils に移行
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import (
@@ -22,7 +22,10 @@ from selenium.common.exceptions import (
 )
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from .oauth_handler import OAuthHandler # Changed to local relative import
+from .oauth_handler import OAuthHandler
+from ...utils.webdriver_utils import get_driver, quit_driver
+from ...utils.logger import setup_logger
+import random
 
 # 広告除外キーワード
 AD_KEYWORDS = [
@@ -45,31 +48,232 @@ AD_KEYWORDS = [
 ]
 
 class TweetScraper:
-    def __init__(self, config):
-        self.config = config
-        self.twitter_config = config.get("twitter_account", {})
-        self.scraping_config = config.get("scraping", {})
-        self.google_drive_config = config.get("google_drive", {}) # Added for Drive
-        self.driver = None
-        self.logger = logging.getLogger(__name__)
-        self.dom_error_log_dir = os.path.join(os.path.dirname(__file__), "logs", "dom_errors")
-        if not os.path.exists(self.dom_error_log_dir):
-            os.makedirs(self.dom_error_log_dir)
-
-        # Initialize Google Drive Service
-        self.drive_service = None
-        if self.google_drive_config.get("enabled", False):
-            try:
-                oauth_handler = OAuthHandler() # Uses oauth_credentials.json and token.json from config/
-                credentials = oauth_handler.get_credentials()
-                self.drive_service = build('drive', 'v3', credentials=credentials)
-                self.logger.info("✅ Google Drive service initialized successfully.")
-            except Exception as e:
-                self.logger.error(f"❌ Failed to initialize Google Drive service: {e}")
+    def __init__(self, bot_config, parent_logger=None):
+        self.bot_config = bot_config
+        self.logger = parent_logger if parent_logger else setup_logger(log_dir_name='bots/curate_bot/logs', logger_name='TweetScraper_default')
         
-        self.temp_download_dir = os.path.join(os.path.dirname(__file__), "temp_media")
-        if not os.path.exists(self.temp_download_dir):
-            os.makedirs(self.temp_download_dir)
+        # bot_config からTwitterアカウント情報を取得
+        twitter_account_info = self.bot_config.get("twitter_account", {})
+        self.username = twitter_account_info.get("username")
+        self.password = twitter_account_info.get("password")
+        self.email = twitter_account_info.get("email") # Emailも追加 (必要な場合)
+
+        # bot_config からUser-Agentリストを取得
+        user_agents = self.bot_config.get("user_agents", [])
+        if not user_agents:
+            self.logger.warning("⚠️ User-Agentが設定されていません。デフォルトのWebDriverのUser-Agentが使用されます。")
+            self.user_agent = None # get_driverにNoneを渡すとよしなに処理される
+        else:
+            self.user_agent = random.choice(user_agents)
+            self.logger.info(f"🤖 使用するUser-Agent: {self.user_agent}")
+
+        # bot_config からWebDriverのプロファイルパスを取得
+        profile_name_suffix = twitter_account_info.get("profile_name_suffix", "default")
+        self.profile_path = os.path.join(
+            os.path.dirname(__file__),  # このファイル(tweet_scraper.py)のディレクトリ
+            ".cache",                   # .cacheサブディレクトリ
+            f"chrome_profile_{profile_name_suffix}" # プロファイル名 (アカウントごとに変える)
+        )
+        os.makedirs(self.profile_path, exist_ok=True)
+        self.logger.info(f"Chromeプロファイルパス: {self.profile_path}")
+
+        self.driver = None
+        self._setup_driver() # コンストラクタでドライバをセットアップ
+
+    def _setup_driver(self):
+        """WebDriverを初期化する"""
+        if self.driver:
+            self.logger.info("WebDriverは既に初期化されています。")
+            return
+        try:
+            self.driver = get_driver(user_agent=self.user_agent, profile_path=self.profile_path)
+            self.logger.info("✅ WebDriverのセットアップが完了しました。")
+        except Exception as e:
+            self.logger.error(f"❌ WebDriverのセットアップ中にエラーが発生しました: {e}", exc_info=True)
+            raise # エラーを再送出して、呼び出し元で処理できるようにする
+
+    def login(self, target_username):
+        if not self.driver:
+            self.logger.error("❌ WebDriverが初期化されていません。ログインできません。")
+            self._setup_driver() # 再度セットアップを試みる
+            if not self.driver: # それでもダメなら例外
+                 raise RuntimeError("WebDriverのセットアップに失敗しました。")
+
+        if not self.username or not self.password:
+            self.logger.error("❌ Twitterのユーザー名またはパスワードが設定されていません。")
+            raise ValueError("Twitterの認証情報が不足しています。")
+
+        self.logger.info(f"Twitterへのログインを開始します: {self.username}")
+        self.driver.get("https://twitter.com/login")
+        time.sleep(random.uniform(2, 4))
+
+        try:
+            # ユーザー名入力フィールド
+            username_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='text']"))
+            )
+            username_input.send_keys(self.username)
+            self.logger.info(f"ユーザー名 {self.username} を入力しました。")
+            
+            # 「次へ」ボタン (最初の画面)
+            next_button_xpath = "//span[contains(text(),'Next') or contains(text(),'次へ')]"
+            next_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, next_button_xpath))
+            )
+            next_button.click()
+            self.logger.info("「次へ」ボタンをクリックしました。")
+            time.sleep(random.uniform(1.5, 3))
+
+            # パスワード入力フィールド (現在のTwitter UIでは、時々追加の確認が入ることがある)
+            # 例: 電話番号やメールアドレスを要求される場合など。ここでは単純なパスワード入力のみを想定。
+            password_input = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='password']"))
+            )
+            password_input.send_keys(self.password)
+            self.logger.info("パスワードを入力しました。")
+
+            # 「ログイン」ボタン
+            login_button_xpath = "//span[contains(text(),'Log in') or contains(text(),'ログイン')]"
+            login_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, login_button_xpath))
+            )
+            login_button.click()
+            self.logger.info("「ログイン」ボタンをクリックしました。")
+            time.sleep(random.uniform(3, 5))
+
+            # ログイン成功の確認 (例: タイムラインが表示されるか)
+            # より堅牢な確認方法が必要な場合がある
+            if "home" in self.driver.current_url.lower():
+                self.logger.info("✅ Twitterへのログインに成功しました！")
+            else:
+                # ログイン後に想定外のURLにいる場合、追加の確認(メール認証など)を求められている可能性がある
+                self.logger.warning(f"⚠️ ログイン後のURLが予期したものではありません: {self.driver.current_url}")
+                if self.email: # メールアドレスが設定されていれば、それを入力してみる試み
+                    try:
+                        email_confirm_input_xpath = "//input[@name='text' and @type='text']" # これは推測
+                        email_confirm_input = WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.XPATH, email_confirm_input_xpath))
+                        )
+                        if email_confirm_input.is_displayed():
+                            self.logger.info(f"追加の確認としてメールアドレス {self.email} の入力を試みます。")
+                            email_confirm_input.send_keys(self.email)
+                            # 再度「次へ」ボタンを探す (同じXPATHeやCSSセレクタかもしれない)
+                            next_button_after_email = WebDriverWait(self.driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, next_button_xpath)) # 最初の「次へ」と同じセレクタを試す
+                            )
+                            next_button_after_email.click()
+                            self.logger.info("メールアドレス入力後の「次へ」ボタンをクリックしました。")
+                            time.sleep(random.uniform(3,5))
+                            if "home" in self.driver.current_url.lower():
+                                self.logger.info("✅ メールアドレスによる追加確認後、ログインに成功しました！")
+                            else:
+                                self.logger.error(f"❌ メールアドレス入力後もログインに失敗しました。現在のURL: {self.driver.current_url}")
+                                raise Exception("ログインシーケンスの追加確認に失敗しました。")
+                    except Exception as e_confirm:
+                        self.logger.error(f"❌ ログイン後の追加確認処理中にエラーが発生しました: {e_confirm}", exc_info=False)
+                        # 追加確認が失敗しても、元のログイン失敗として扱う
+                        self.logger.error("❌ Twitterへのログインに失敗しました。 (追加確認プロセス後)")
+                        # ここでスクリーンショットを取るなどのデバッグ情報を追加しても良い
+                        # self.driver.save_screenshot(os.path.join(self.profile_path, "login_failure_screenshot.png"))
+                        raise Exception("ログインに失敗しました。タイムラインに遷移できませんでした。")
+                else:
+                    self.logger.error("❌ Twitterへのログインに失敗しました。 (追加確認が必要そうですがメールアドレス未設定)")
+                    raise Exception("ログインに失敗しました。タイムlineに遷移できませんでした。")
+
+        except Exception as e:
+            self.logger.error(f"❌ ログイン処理中にエラーが発生しました: {e}", exc_info=True)
+            # self.driver.save_screenshot(os.path.join(self.profile_path, "login_error_screenshot.png"))
+            self.cleanup()
+            raise
+
+    def extract_tweets(self, username, max_tweets, globally_processed_ids):
+        if not self.driver:
+            self.logger.error("❌ WebDriverが初期化されていません。ツイートを収集できません。")
+            raise RuntimeError("WebDriverが初期化されていません。")
+
+        self.logger.info(f"{username} のツイート収集を開始します。最大 {max_tweets} 件。")
+        self.driver.get(f"https://twitter.com/{username}")
+        time.sleep(random.uniform(3,5)) # ページ読み込み待ち
+
+        tweets_data = []
+        last_height = self.driver.execute_script("return document.body.scrollHeight")
+        collected_count = 0
+
+        while collected_count < max_tweets:
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(random.uniform(2,4)) # スクロール後のコンテンツ読み込み待ち
+            new_height = self.driver.execute_script("return document.body.scrollHeight")
+
+            # ページ上のツイート要素を取得 (セレクタはXのUI変更に合わせて調整が必要な場合がある)
+            # ここでは 'article' タグでツイートを大まかに取得する例
+            tweet_elements = self.driver.find_elements(By.XPATH, "//article[@data-testid='tweet']")
+            self.logger.info(f"現在 {len(tweet_elements)} 個のツイート要素を検出しました。")
+
+            for el in tweet_elements:
+                if collected_count >= max_tweets:
+                    break
+                try:
+                    tweet_text_element = el.find_element(By.XPATH, ".//div[@data-testid='tweetText']")
+                    tweet_text = tweet_text_element.text
+                    # tweet_id はURLなどから取得する必要がある。
+                    # XPATHで permalink を探し、その href からIDを抽出する例
+                    permalink_element = el.find_element(By.XPATH, ".//a[contains(@href, '/status/') and .//time]")
+                    tweet_link = permalink_element.get_attribute('href')
+                    tweet_id = tweet_link.split('/')[-1]
+
+                    if tweet_id in globally_processed_ids:
+                        self.logger.debug(f"スキップ (処理済み): {tweet_id}")
+                        continue
+                        
+                    # 画像/動画のURLを取得 (複数ある場合も考慮)
+                    media_urls = [] 
+                    # 画像の場合: .//div[@data-testid='photos']//img
+                    image_elements = el.find_element(By.XPATH, ".//div[@data-testid='photos']//img[contains(@src, 'format=')]")
+                    for img_el in image_elements:
+                        img_src = img_el.get_attribute('src')
+                        # URLからクエリパラメータを除去して高解像度版を取得する試み (例: &name=small を除く)
+                        img_src_high_res = img_src.split('&name=')[0] if '&name=' in img_src else img_src
+                        media_urls.append(img_src_high_res)
+                    
+                    # 動画の場合: .//div[@data-testid='videoPlayer']//video (これは簡略化された例、実際はもっと複雑)
+                    # Xの動画は直接的な <video src="..."> 形式ではないことが多い。
+                    # ストリーミングマニフェスト (m3u8) や blob URL を扱う必要があるかもしれない。
+                    # ここでは単純化のため、動画の直接的な抽出は実装していない。
+                    # 代わりに、動画を含むツイートの permalink をメディアとして扱うことも考えられる。
+
+                    tweets_data.append({
+                        "id": tweet_id,
+                        "text": tweet_text,
+                        "user": username, # 本来はツイートから取得すべき
+                        "url": tweet_link,
+                        "media_urls": media_urls,
+                        "created_at": permalink_element.find_element(By.TAG_NAME, "time").get_attribute("datetime") # 投稿日時
+                    })
+                    globally_processed_ids.add(tweet_id) # 収集済みとしてIDを記録
+                    collected_count += 1
+                    self.logger.info(f"収集済み: {collected_count}/{max_tweets} (ID: {tweet_id}) - Media: {len(media_urls)}")
+
+                except Exception as e:
+                    # self.logger.warning(f"ツイート要素の解析中にエラー: {e}", exc_info=True)
+                    # 一つのツイートの解析エラーで全体を止めない
+                    pass 
+            
+            if new_height == last_height and collected_count < max_tweets:
+                self.logger.info("ページの最下部までスクロールしましたが、新しいツイートはありませんでした。収集を終了します。")
+                break
+            last_height = new_height
+            if collected_count == 0 and len(tweet_elements) > 50: # 要素は大量にあるのに一つも収集できない場合（セレクタが古い可能性など）
+                self.logger.warning("多数のツイート要素を検出しましたが、内容を抽出できませんでした。セレクタが古い可能性があります。")
+                break
+
+        self.logger.info(f"収集完了: {username} から {collected_count} 件のツイートを取得しました。")
+        return tweets_data[:max_tweets] # max_tweets を超えないようにスライス
+
+    def cleanup(self):
+        if self.driver:
+            self.logger.info("WebDriverをクリーンアップします。")
+            quit_driver(self.driver)
+            self.driver = None
 
     def _save_dom_error_log(self, element_html, error_identifier):
         """DOMエラーHTMLをファイルに保存し、ファイルパスを返す"""
@@ -85,100 +289,6 @@ class TweetScraper:
         except Exception as e:
             self.logger.error(f"DOMエラーログファイルの保存に失敗しました: {filepath}, Error: {e}")
             return None
-
-    def setup_driver(self):
-        """ブラウザドライバーの設定"""
-        options = Options()
-        options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--lang=ja-JP")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        # Add a common User-Agent string
-        user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        options.add_argument(f"user-agent={user_agent}")
-        # Add a unique user-data-dir to prevent session conflicts
-        user_data_dir = os.path.join(os.path.dirname(__file__), 'chrome_profile', datetime.now().strftime('%Y%m%d%H%M%S%f'))
-        options.add_argument(f"--user-data-dir={user_data_dir}")
-        self.driver = webdriver.Chrome(options=options)
-        return self.driver
-
-    def login(self, target=None):
-        """Twitterへのログイン処理"""
-        cookies_path = os.path.join(os.path.dirname(__file__), ".cache", "twitter_cookies.json")
-        if os.path.exists(cookies_path):
-            self.logger.info("✅ Cookieセッション検出 → ログインスキップ")
-            self.logger.info("🌐 https://twitter.com にアクセスしてクッキー読み込み中…")
-            self.driver.get("https://twitter.com/")
-            self.driver.delete_all_cookies()
-            with open(cookies_path, "r") as f:
-                cookies = json.load(f)
-                for cookie in cookies:
-                    self.driver.add_cookie(cookie)
-            self.driver.get(f"https://twitter.com/{target or self.twitter_config.get('username')}")
-            return
-
-        self.logger.info("🔐 初回ログイン処理を開始")
-        self.driver.get("https://twitter.com/i/flow/login")
-        try:
-            email_input = WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.NAME, "text"))
-            )
-            email_input.send_keys(self.twitter_config.get("email"))
-            email_input.send_keys(Keys.ENTER)
-            time.sleep(2)
-        except TimeoutException as e_timeout: # Specifically catch TimeoutException
-            screenshot_path = os.path.join(os.path.dirname(__file__), "logs", "login_timeout_error.png")
-            self.driver.save_screenshot(screenshot_path)
-            self.logger.error(f"❌ ログイン中のメール入力フィールドでタイムアウト。スクリーンショット: {screenshot_path}")
-            raise e_timeout # Re-raise the exception after saving screenshot
-        except Exception as e_general: # Catch other potential exceptions
-            screenshot_path = os.path.join(os.path.dirname(__file__), "logs", "login_general_error.png")
-            self.driver.save_screenshot(screenshot_path)
-            self.logger.error(f"❌ ログイン中のメール入力で予期せぬエラー。スクリーンショット: {screenshot_path}")
-            raise e_general # Re-raise
-
-        try:
-            username_input = WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.NAME, "text"))
-            )
-            username_input.send_keys(self.twitter_config.get("username"))
-            username_input.send_keys(Keys.ENTER)
-            time.sleep(2)
-        except TimeoutException: # Specifically catch TimeoutException for username
-            self.logger.info("👤 ユーザー名入力フィールドでタイムアウト、スキップします。")
-            # Optionally, save a screenshot here too if needed for debugging this step
-            # screenshot_path = os.path.join(os.path.dirname(__file__), "logs", "login_username_timeout.png")
-            # self.driver.save_screenshot(screenshot_path)
-        except Exception:
-            self.logger.info("👤 ユーザー名入力スキップ")
-
-        try:
-            password_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.NAME, "password"))
-            )
-            password_input.send_keys(self.twitter_config.get("password"))
-            password_input.send_keys(Keys.ENTER)
-            time.sleep(6)
-        except TimeoutException as e_timeout_pw: # Specifically catch TimeoutException for password
-            screenshot_path = os.path.join(os.path.dirname(__file__), "logs", "login_password_timeout.png")
-            self.driver.save_screenshot(screenshot_path)
-            self.logger.error(f"❌ ログイン中のパスワード入力フィールドでタイムアウト。スクリーンショット: {screenshot_path}")
-            raise e_timeout_pw
-        except Exception as e_general_pw: # Catch other potential exceptions
-            screenshot_path = os.path.join(os.path.dirname(__file__), "logs", "login_password_general_error.png")
-            self.driver.save_screenshot(screenshot_path)
-            self.logger.error(f"❌ ログイン中のパスワード入力で予期せぬエラー。スクリーンショット: {screenshot_path}")
-            raise e_general_pw
-
-        cookies = self.driver.get_cookies()
-        os.makedirs(os.path.dirname(cookies_path), exist_ok=True)
-        with open(cookies_path, "w") as f:
-            json.dump(cookies, f)
-        self.logger.info("✅ ログイン成功 → 投稿者ページに遷移")
-        self.driver.get(f"https://twitter.com/{target}")
 
     def extract_tweet_id(self, article):
         """ツイートIDの抽出"""
@@ -219,228 +329,10 @@ class TweetScraper:
             self.logger.error(f"OCR失敗({image_path}): {e}")
             return "[OCRエラー]"
 
-    def extract_tweets(self, extract_target, max_tweets, globally_processed_ids, remaining_needed=None):
-        """ツイートの抽出"""
-        user_profile_url = f"https://twitter.com/{extract_target}"
-        self.logger.info(f"\n✨ アクセス中: {user_profile_url}")
-        self.driver.get(user_profile_url)
-        time.sleep(3)
-
-        url_collection_limit = None
-        if remaining_needed is not None and remaining_needed > 0:
-            url_collection_limit = min(remaining_needed * 2, 50) if remaining_needed <= 25 else 50
-            self.logger.info(f"ℹ️ 残り必要数: {remaining_needed}件、URL取得上限: {url_collection_limit}件に調整")
-        else:
-            url_collection_limit = min(max_tweets * 2, 50) if max_tweets <= 25 else 50
-            self.logger.info(f"ℹ️ 初回取得: max_tweets={max_tweets}件、URL取得上限: {url_collection_limit}件に設定")
-
-        tweet_urls = []
-        seen_urls_in_current_call = set()
-        scroll_count = 0
-        max_scrolls = self.scraping_config.get("max_scrolls_extract_tweets", 20)
-        pause_threshold = self.scraping_config.get("pause_threshold_extract_tweets", 6)
-        scroll_pause_time = self.scraping_config.get("scroll_pause_time", 2.5)
-        pause_counter = 0
-
-        while len(tweet_urls) < url_collection_limit and scroll_count < max_scrolls:
-            articles = self.driver.find_elements(By.XPATH, "//article[@data-testid='tweet']")
-            
-            for article in articles:
-                tweet_id = None
-                try:
-                    tweet_id = self.extract_tweet_id(article)
-                    if not tweet_id or tweet_id in globally_processed_ids or tweet_id in seen_urls_in_current_call:
-                        continue
-
-                    text = ""
-                    text_xpath = ".//div[@data-testid='tweetText']"
-                    try:
-                        text_elem = article.find_element(By.XPATH, text_xpath)
-                        text = text_elem.text
-                        self.logger.info(f"取得した本文 ({tweet_id}): {text}")
-                    except NoSuchElementException:
-                        article_html = article.get_attribute('innerHTML')
-                        log_path = self._save_dom_error_log(article_html, f"tweet_text_{tweet_id or 'unknown'}")
-                        self.logger.error(f"本文取得失敗 ({tweet_id or 'unknown'}): XPathが見つかりません - {text_xpath}. HTMLログ: {log_path}")
-                    except Exception as e:
-                        self.logger.error(f"本文取得中に予期せぬエラー ({tweet_id or 'unknown'}): {e}")
-
-                    username = ""
-                    # Attempt to get username (@handle) first
-                    user_id_xpath = ".//div[@data-testid='User-Name']/following-sibling::div//a[starts-with(@href, '/')]//span[starts-with(text(), '@')]"
-                    display_name_xpath = ".//div[@data-testid='User-Name']//span[contains(@class, 'css-1jxf684')]/span[contains(@class, 'css-1jxf684')]"
-                    user_profile_link_xpath = ".//div[@data-testid='User-Name']//a[starts-with(@href, '/') and .//span[contains(@class, 'css-1jxf684')]]"
-
-                    try:
-                        # Try to get the @username from the link's href near display name
-                        # WebDriverWait for the user profile link within the article context
-                        user_profile_link_element = WebDriverWait(article, 2).until(
-                            EC.presence_of_element_located((By.XPATH, user_profile_link_xpath))
-                        )
-                        href_value = user_profile_link_element.get_attribute("href")
-                        if href_value:
-                            username = href_value.split('/')[-1]
-                            self.logger.info(f"取得した投稿者 (from href): {username}")
-                        else:
-                            # Fallback to display name if href is not found or empty
-                            display_name_element = WebDriverWait(article, 1).until(
-                                EC.presence_of_element_located((By.XPATH, display_name_xpath))
-                            )
-                            username = display_name_element.text
-                            self.logger.info(f"取得した投稿者 (display name): {username}")
-                    except Exception: # Changed from NoSuchElementException to broader Exception for timeout
-                        article_html = article.get_attribute('innerHTML')
-                        log_path = self._save_dom_error_log(article_html, f"tweet_username_{tweet_id or 'unknown'}")
-                        self.logger.error(f"投稿者取得失敗 ({tweet_id or 'unknown'}): User-Name XPath (href or display name) が見つかりません. Searched XPaths: [{user_profile_link_xpath}, {display_name_xpath}]. HTMLログ: {log_path}")
-                    except Exception as e:
-                        self.logger.error(f"投稿者取得中に予期せぬエラー ({tweet_id or 'unknown'}): {e}")
-                        
-                    media_urls = []
-                    # 画像URLの抽出とデバッグログの追加
-                    image_xpath_patterns = [
-                        # 通常の画像ツイート（imgタグ、mediaまたはcard_img）
-                        ".//div[@data-testid='tweetPhoto']//img[contains(@src, 'pbs.twimg.com/media') or contains(@src, 'pbs.twimg.com/card_img')]",
-                        # style属性のbackground-image（articleタグ直下、mediaまたはcard_img）
-                        ".//article[@data-testid='tweet']//div[contains(@style, \"background-image: url('https://pbs.twimg.com/media')\")]",
-                        ".//article[@data-testid='tweet']//div[contains(@style, \"background-image: url('https://pbs.twimg.com/card_img')\")]",
-                        # カード型ツイートのimgタグ（card_img）
-                        ".//div[contains(@data-testid, 'card.layoutLarge.media')]//img[contains(@src, 'pbs.twimg.com/card_img')]",
-                        # カード型ツイートのstyle属性background-image（card_img）
-                        ".//div[contains(@data-testid, 'card.layoutLarge.media')]//div[contains(@style, \"background-image: url('https://pbs.twimg.com/card_img')\")]"
-                    ]
-
-                    all_image_elements = []
-                    for pattern in image_xpath_patterns:
-                        try:
-                            elements = article.find_elements(By.XPATH, pattern)
-                            all_image_elements.extend(elements)
-                        except Exception as e_xpath:
-                            self.logger.debug(f"XPath検索中にエラー ({tweet_id or 'unknown'}): {pattern}, Error: {e_xpath}")
-                            # ここではエラーがあっても続行し、他のパターンで試行する
-
-                    try:
-                        if not all_image_elements:
-                            pass # 画像なしツイートの場合はログ出力しない
-
-                        # 重複する可能性のある要素をsrcやstyle属性で一意にする
-                        processed_image_sources = set()
-
-                        for img_element in all_image_elements:
-                            src = None
-                            try:
-                                if img_element.tag_name == 'img':
-                                    src = img_element.get_attribute("src")
-                                elif img_element.tag_name == 'div':
-                                    style = img_element.get_attribute("style")
-                                    match = re.search(r'background-image: url\([\'\"](.+?)[\'\"]\)', style) # シングルまたはダブルクォートに対応
-                                    if match:
-                                        src = match.group(1)
-                            except StaleElementReferenceException:
-                                self.logger.warning(f"画像要素が古くなりました ({tweet_id or 'unknown'})。スキップします。")
-                                continue # 次の要素へ
-                            except Exception as e_attr:
-                                self.logger.warning(f"画像属性取得中にエラー ({tweet_id or 'unknown'}) 要素: {img_element.tag_name}, Error: {e_attr}")
-                                continue
-
-                            if src and src not in processed_image_sources:
-                                processed_image_sources.add(src) # 処理済みソースとして追加
-                                # Ensure we get the full URL if there are query parameters like format=jpg&name=small
-                                if "?" in src:
-                                    src_to_add = src.split("?")[0] + "?format=jpg&name=orig"
-                                else:
-                                    src_to_add = src
-
-                                # 動画のサムネイル(poster)と重複する可能性のあるcard_imgを避ける
-                                if "video_thumb" not in src_to_add and "amplify_video_thumb" not in src_to_add:
-                                    if src_to_add not in media_urls:
-                                        media_urls.append(src_to_add)
-                                    
-                    except Exception as e_proc:
-                        self.logger.error(f"画像処理中に予期せぬエラー ({tweet_id or 'unknown'}): {e_proc}", exc_info=True)
-
-                    # 動画URLの抽出とデバッグログの追加
-                    videos_xpath = ".//div[@data-testid='videoPlayer']//video | .//div[@data-testid='tweetAttachments']//video[contains(@src, 'video.twimg.com')]"
-                    try:
-                        video_elements = article.find_elements(By.XPATH, videos_xpath)
-                        if not video_elements:
-                            # self.logger.debug(f"動画要素が見つかりませんでした ({tweet_id})。 XPath: {videos_xpath}")
-                            pass
-                        for video in video_elements:
-                            src = video.get_attribute("src")
-                            poster = video.get_attribute("poster") # ポスター画像も候補として追加
-                            if src and src not in media_urls:
-                                media_urls.append(src)
-                            elif poster and poster.startswith("https://pbs.twimg.com/media/") and poster not in media_urls:
-                                 media_urls.append(poster) # videoタグのsrcがない場合、poster画像も試す
-                    except NoSuchElementException:
-                        article_html = article.get_attribute('innerHTML')
-                        log_path = self._save_dom_error_log(article_html, f"tweet_videos_{tweet_id or 'unknown'}")
-                        self.logger.warning(f"動画要素の検索で予期せぬエラー ({tweet_id or 'unknown'})。XPath: {videos_xpath}. HTMLログ: {log_path}")
-
-                    self.logger.info(f"取得したmedia_urls ({tweet_id}): {media_urls}")
-
-                    # Process media and upload to Google Drive if enabled
-                    final_media_links_for_notion = []
-                    if self.drive_service and self.google_drive_config.get("enabled", False) and media_urls:
-                        self.logger.info(f"[Drive] Processing {len(media_urls)} media items for tweet {tweet_id}")
-                        for original_media_url in media_urls:
-                            local_path = self._download_media(original_media_url, tweet_id)
-                            if local_path:
-                                drive_link = self._upload_to_drive_and_get_link(local_path, tweet_id)
-                                if drive_link:
-                                    final_media_links_for_notion.append(drive_link)
-                                else:
-                                    # Upload failed, keep original URL as fallback or handle error
-                                    self.logger.warning(f"[Drive] Upload failed for {original_media_url}, keeping original link.")
-                                    final_media_links_for_notion.append(original_media_url) # Fallback
-                            else:
-                                # Download failed
-                                self.logger.warning(f"[Drive] Download failed for {original_media_url}, keeping original link.")
-                                final_media_links_for_notion.append(original_media_url) # Fallback
-                    else:
-                        # Drive not enabled or no media, use original X media URLs
-                        final_media_links_for_notion = media_urls
-
-                    tweet_urls.append({
-                        "id": tweet_id,
-                        "url": f"https://twitter.com/{extract_target}/status/{tweet_id}",
-                        "text": text,
-                        "username": username,
-                        "media_urls": final_media_links_for_notion # Use Drive links if available
-                    })
-                    seen_urls_in_current_call.add(tweet_id)
-
-                    if len(tweet_urls) >= url_collection_limit:
-                        break
-
-                except Exception as e:
-                    self.logger.error(f"⚠️ ツイート抽出処理中に予期せぬエラー ({tweet_id or 'unknown'}): {str(e)}", exc_info=True)
-                    continue
-
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(scroll_pause_time)
-            scroll_count += 1
-
-            if len(seen_urls_in_current_call) == len(tweet_urls):
-                pause_counter += 1
-                if pause_counter >= pause_threshold:
-                    self.logger.info(f"⚠️ {pause_threshold}回連続で新規ツイートが見つからないため、スクロールを停止")
-                    break
-            else:
-                pause_counter = 0
-            
-        return tweet_urls
-
     def is_ad_post(self, text):
         """広告投稿の判定"""
         lowered = text.lower()
         return any(k.lower() in lowered for k in AD_KEYWORDS)
-
-    def cleanup(self):
-        """リソースのクリーンアップ"""
-        if self.driver:
-            self.driver.quit()
-            self.logger.info("WebDriverをクリーンアップしました。")
 
     def _download_media(self, media_url, tweet_id):
         """Downloads media from a URL to a temporary local path."""
