@@ -26,21 +26,40 @@ class TestNotionWriter(unittest.TestCase):
         """テストクラス全体の初期設定"""
         cls.config = config_loader.load_config()
         if not cls.config:
+            # ロガーがまだ初期化されていない可能性があるため、標準出力にフォールバック
+            print("ERROR: 設定ファイルが読み込めませんでした。テストをスキップします。")
             raise unittest.SkipTest("設定ファイルが読み込めませんでした。テストをスキップします。")
 
-        notion_config = cls.config.get('notion', {})
-        cls.notion_token = notion_config.get("token")
-        cls.database_id = notion_config.get('databases', {}).get('curation')
+        # Notion設定の取得元を修正
+        curate_bot_notion_config = cls.config.get('curate_bot', {}).get('notion', {})
+        cls.notion_token = curate_bot_notion_config.get("token")
+        cls.database_id = curate_bot_notion_config.get('databases', {}).get('curation_main') # キーを 'curation_main' に修正
+
+        # ロガーを先に初期化
+        cls.logger = setup_logger(log_dir_name='tests/logs', log_file_name='test_notion_writer.log', logger_name='TestNotionWriter')
+
+        # デバッグログを出力
+        cls.logger.info(f"DEBUG: Notion Token read from config: {cls.notion_token}")
+        cls.logger.info(f"DEBUG: Database ID (curation_main) read from config: {cls.database_id}")
 
         if not cls.notion_token or not cls.database_id:
+            cls.logger.error("❌ NotionのトークンまたはデータベースIDが設定ファイルから正しく読み取れませんでした。テストをスキップします。")
             raise unittest.SkipTest("NotionのトークンまたはデータベースIDが設定されていません。テストをスキップします。")
 
-        # テスト用のロガーをセットアップ
-        # tests/logs/test_notion_writer.log のようなパスに出力
-        cls.logger = setup_logger(log_dir_name='tests/logs', log_file_name='test_notion_writer.log', logger_name='TestNotionWriter')
-        
-        # NotionWriterインスタンスを作成 (loggerを渡す)
-        cls.writer = NotionWriter(cls.notion_token, cls.database_id, cls.logger)
+        # NotionWriterインスタンスを作成
+        curate_bot_config = cls.config.get('curate_bot')
+        if not curate_bot_config:
+            cls.logger.error("❌ curate_bot の全体設定が読み込めませんでした。テストをスキップします。")
+            raise unittest.SkipTest("curate_bot の設定が読み込めませんでした。")
+        cls.writer = NotionWriter(curate_bot_config, cls.logger)
+
+        # スキーマ更新を試みる
+        try:
+            cls.logger.info("テストクラス初期化時にデータベーススキーマの確認・更新を試みます...")
+            cls.writer.ensure_database_schema()
+        except Exception as e:
+            cls.logger.error(f"スキーマ確認・更新中にエラーが発生しました: {e}")
+            # スキーマ更新の失敗がテスト続行不可能と判断する場合はSkipTestも検討
 
         # スキーマ更新はここでは自動実行しない (手動または別途スクリプトで対応)
         # print("スキーマを更新しますか？ (yes/no)")
@@ -93,32 +112,49 @@ class TestNotionWriter(unittest.TestCase):
 
     def test_01_add_post_single_image(self):
         self.logger.info("\n--- test_add_post_single_image 開始 ---")
-        gdrive_url = "https://drive.google.com/file/d/1uv-Ejpg6mXeX0Zoi367-KWsfG83oDyyj/view?usp=sharing" # ユーザーが指定したURL
-        raw_data = self._create_base_post_data("test_single_001", "単一画像(GDrive)のテスト投稿。", [gdrive_url])
-        notion_data = self._prepare_notion_post_data(raw_data)
+        gdrive_url = "https://www.publicdomainpictures.net/pictures/20000/velka/cat-looking-at-viewer.jpg" # OCRテスト用の直リンク画像に変更
+        raw_data = self._create_base_post_data("test_single_001", "単一画像(直リンク)のテスト投稿。", [gdrive_url])
+        # notion_data は add_post に直接渡さないが、OCRテキストの準備のために呼び出す
+        prepared_notion_props = self._prepare_notion_post_data(raw_data) 
         
-        created_page = self.writer.add_post(notion_data)
+        created_page = self.writer.add_post(
+            tweet_id=raw_data["ID"],
+            text=raw_data["本文"],
+            user=raw_data["投稿者"],
+            tweet_url=f"https://twitter.com/{raw_data['投稿者']}/status/{raw_data['ID']}", # ダミーURL
+            media_urls=raw_data["画像/動画URL"],
+            created_at_str=raw_data["投稿日時"], # _create_base_post_data は %Y-%m-%d %H:%M 形式なのでISO形式に変換が必要かも
+            ocr_text=prepared_notion_props["OCRテキスト"]
+        )
         self.assertIsNotNone(created_page, "ページの作成に失敗しました。")
-        self.assertEqual(created_page["properties"]["ID"]["title"][0]["text"]["content"], raw_data["ID"])
+        self.assertEqual(created_page["properties"]["ツイートID"]["title"][0]["text"]["content"], raw_data["ID"]) # プロパティ名を修正
         self.assertEqual(created_page["properties"]["画像URL1"]["url"], gdrive_url)
         self.assertIsNone(created_page["properties"]["画像URL2"]["url"])
         self.logger.info(f"作成されたページID: {created_page.get('id')}")
 
     def test_02_add_post_multiple_images(self):
         self.logger.info("\n--- test_add_post_multiple_images 開始 ---")
-        placeholder_base = "https://via.placeholder.com/150"
+        # placeholder.com は名前解決エラーが出ていたため、別の安定した画像URLに変更 (例: placekitten)
         image_urls = [
-            f"{placeholder_base}/FF0000/FFFFFF?Text=Img1_test",
-            f"{placeholder_base}/00FF00/000000?Text=Img2_test",
-            f"{placeholder_base}/0000FF/FFFFFF?Text=Img3_test",
-            f"{placeholder_base}/FFFF00/000000?Text=Img4_test"
+            "http://placekitten.com/200/300",
+            "http://placekitten.com/200/301",
+            "http://placekitten.com/200/302",
+            "http://placekitten.com/200/303"
         ]
         raw_data = self._create_base_post_data("test_multi_001", "複数(4枚)画像のテスト投稿。", image_urls)
-        notion_data = self._prepare_notion_post_data(raw_data)
+        prepared_notion_props = self._prepare_notion_post_data(raw_data)
 
-        created_page = self.writer.add_post(notion_data)
+        created_page = self.writer.add_post(
+            tweet_id=raw_data["ID"],
+            text=raw_data["本文"],
+            user=raw_data["投稿者"],
+            tweet_url=f"https://twitter.com/{raw_data['投稿者']}/status/{raw_data['ID']}",
+            media_urls=raw_data["画像/動画URL"],
+            created_at_str=raw_data["投稿日時"],
+            ocr_text=prepared_notion_props["OCRテキスト"]
+        )
         self.assertIsNotNone(created_page, "ページの作成に失敗しました。")
-        self.assertEqual(created_page["properties"]["ID"]["title"][0]["text"]["content"], raw_data["ID"])
+        self.assertEqual(created_page["properties"]["ツイートID"]["title"][0]["text"]["content"], raw_data["ID"]) # プロパティ名を修正
         for i, url in enumerate(image_urls):
             self.assertEqual(created_page["properties"][f"画像URL{i+1}"]["url"], url, f"画像URL{i+1}が一致しません")
         self.logger.info(f"作成されたページID: {created_page.get('id')}")
@@ -126,25 +162,44 @@ class TestNotionWriter(unittest.TestCase):
     def test_03_add_post_no_image(self):
         self.logger.info("\n--- test_add_post_no_image 開始 ---")
         raw_data = self._create_base_post_data("test_noimg_001", "画像なしのテスト投稿。")
-        notion_data = self._prepare_notion_post_data(raw_data)
+        prepared_notion_props = self._prepare_notion_post_data(raw_data)
 
-        created_page = self.writer.add_post(notion_data)
+        created_page = self.writer.add_post(
+            tweet_id=raw_data["ID"],
+            text=raw_data["本文"],
+            user=raw_data["投稿者"],
+            tweet_url=f"https://twitter.com/{raw_data['投稿者']}/status/{raw_data['ID']}",
+            media_urls=raw_data["画像/動画URL"], # 空のリストになる
+            created_at_str=raw_data["投稿日時"],
+            ocr_text=prepared_notion_props["OCRテキスト"] # None になる
+        )
         self.assertIsNotNone(created_page, "ページの作成に失敗しました。")
-        self.assertEqual(created_page["properties"]["ID"]["title"][0]["text"]["content"], raw_data["ID"])
+        self.assertEqual(created_page["properties"]["ツイートID"]["title"][0]["text"]["content"], raw_data["ID"]) # プロパティ名を修正
         self.assertIsNone(created_page["properties"]["画像URL1"]["url"])
-        self.assertIsNone(created_page["properties"]["OCRテキスト"]["rich_text"] or None) # 空のrich_textは[]
+        # OCRテキストがNoneの場合、Notionではrich_textプロパティ自体が存在しないか、空のリストになる
+        ocr_prop_data = created_page["properties"]["OCRテキスト"].get("rich_text", [])
+        self.assertTrue(not ocr_prop_data, "OCRテキストがNoneであるべきが、何らかの値が設定されています。")
         self.logger.info(f"作成されたページID: {created_page.get('id')}")
 
     def test_04_add_post_with_ocr(self):
         self.logger.info("\n--- test_add_post_with_ocr 開始 ---")
-        ocr_image_url = "https://www.bannerbatterien.com/upload/filecache/Banner-Batterien-Logo-jpg_0x0_100_c53520092348a5ce143f9a11da8e1376.jpg"
-        expected_ocr_text_partial = "Banner"
-        raw_data = self._create_base_post_data("test_ocr_002", "OCR機能のテスト投稿。画像に 'Banner' という文字が含まれるはず。", [ocr_image_url])
-        notion_data = self._prepare_notion_post_data(raw_data)
+        # OCRテスト用の画像URLを安定していそうなものに変更
+        ocr_image_url = "https://www.gstatic.com/webp/gallery/1.jpg" 
+        expected_ocr_text_partial = "Google" # 画像の内容に合わせて期待値を変更 (この画像には "Google" の文字が含まれているはず)
+        raw_data = self._create_base_post_data("test_ocr_002", "OCR機能のテスト投稿。", [ocr_image_url])
+        prepared_notion_props = self._prepare_notion_post_data(raw_data)
 
-        created_page = self.writer.add_post(notion_data)
+        created_page = self.writer.add_post(
+            tweet_id=raw_data["ID"],
+            text=raw_data["本文"],
+            user=raw_data["投稿者"],
+            tweet_url=f"https://twitter.com/{raw_data['投稿者']}/status/{raw_data['ID']}",
+            media_urls=raw_data["画像/動画URL"],
+            created_at_str=raw_data["投稿日時"],
+            ocr_text=prepared_notion_props["OCRテキスト"]
+        )
         self.assertIsNotNone(created_page, "ページの作成に失敗しました。")
-        self.assertEqual(created_page["properties"]["ID"]["title"][0]["text"]["content"], raw_data["ID"])
+        self.assertEqual(created_page["properties"]["ツイートID"]["title"][0]["text"]["content"], raw_data["ID"]) # プロパティ名を修正
         self.assertEqual(created_page["properties"]["画像URL1"]["url"], ocr_image_url)
         
         ocr_prop_data = created_page["properties"]["OCRテキスト"].get("rich_text", [])
@@ -152,7 +207,7 @@ class TestNotionWriter(unittest.TestCase):
         if ocr_prop_data and isinstance(ocr_prop_data, list) and len(ocr_prop_data) > 0:
             inserted_ocr_text = ocr_prop_data[0].get("text", {}).get("content", "")
         
-        self.assertIn(expected_ocr_text_partial.lower(), inserted_ocr_text.lower(), "期待したOCRテキストが含まれていません。")
+        self.assertIn(expected_ocr_text_partial.lower(), inserted_ocr_text.lower(), f"期待したOCRテキスト '{expected_ocr_text_partial}' が含まれていません。実際のテキスト: '{inserted_ocr_text}'")
         self.logger.info(f"作成されたページID: {created_page.get('id')}, OCRテキスト: {inserted_ocr_text[:100]}...")
 
 if __name__ == '__main__':

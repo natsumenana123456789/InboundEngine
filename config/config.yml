@@ -1,0 +1,95 @@
+common:
+  log_level: "INFO"
+  file_paths:
+    google_key_file: "config/gspread-key.json" # configディレクトリからの相対パスに修正
+  default_user_agents:
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+
+notion:
+  token: "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"
+  databases:
+    curation_main: "1fb422325cdd814299dade509fa60a5c" # 正しいDB ID
+
+gemini_api:
+  service_account_file: "config/gcp_service_account_key.json" # configディレクトリからの相対パス
+  api_key: "AIzaSyBaUiZr1XF-SrbUa2Uy69IO8ATpPpqiuro"
+  # model_name: "gemini-pro-vision"
+
+openai_api:
+  api_key: "DUMMY_API_KEY_FOR_PUSH"
+  # model_name: "gpt-4o"
+
+twitter_api:
+  bearer_token: "AAAAAAAAAAAAAAAAAAAAAOnVTwEAAAAA9ZhCEbFbnKgvwARyXLvf%2B%2FSqAxY%3D9DrZcAqkFVnMuN8LVVQMxzADNgh3K2uasf4bVyS13xvzzVdh4e"
+  consumer_key: "YOUR_CONSUMER_KEY_HERE"
+  consumer_secret: "YOUR_CONSUMER_SECRET_HERE"
+  access_token: "YOUR_ACCESS_TOKEN_HERE"
+  access_token_secret: "YOUR_ACCESS_TOKEN_SECRET_HERE"
+  user_id_cache:
+    pug_pua: "4550523914" # 例: 前回取得した pug_pua のID
+    # elonmusk: "44196397" # 他のユーザーも必要に応じて追加
+    # TwitterDev: "2244994945"
+    # ... 必要に応じて他のユーザーも追加
+
+curate_bot:
+  enabled: true
+  twitter_accounts:
+    - account_id: "curation_account_1"
+      email: "jptmarketing.takahashi@gmail.com"
+      username: "jadiAngkat"
+      password: "Wm3hMCUT"
+      profile_name_suffix: "curate_main"
+  active_curation_account_id: "curation_account_1"
+  user_agents: null # 実行時にcommon.default_user_agentsで補完
+  scraping:
+    extract_target: "YahooNewsTopics"
+    max_tweets: 30
+    mode: "target_only"
+    save_media_to_gdrive: true
+    ocr_enabled: true
+    use_gpt: true
+  google_drive:
+    enabled: true
+    folder_id: "YOUR_GDRIVE_FOLDER_ID"
+
+auto_post_bot:
+  enabled: true
+  source: "google_sheets"
+  twitter_accounts:
+    - account_id: "autopost_account_1"
+      email: "jptmarketing.takahashi@gmail.com"
+      username: "jadiAngkat"
+      password: "YOUR_AUTOPOST_BOT_TWITTER_PASSWORD"
+      profile_name_suffix: "autopost_main"
+  active_autopost_account_id: "autopost_account_1"
+  user_agents: null # 実行時にcommon.default_user_agentsで補完
+  posting_settings:
+    char_limit: { min: 135, max: 150 }
+    video_download_filename: "temp_video_for_post.mp4"
+  google_sheets_source:
+    enabled: true
+    sheet_name: "投稿DB群"
+    worksheet_name: "投稿データ"
+    columns: ["ID", "投稿日時", "本文", "画像/動画URL", "投稿者", "取得日時", "ステータス"]
+    batch_size: 100
+  scheduler:
+    enabled: true
+    script_name: "run_auto_post_bot.sh"
+    plist_dir: "~/Library/LaunchAgents"
+    label_prefix: "com.example.autopostbot"
+    base_time: "09:00"
+    mean_interval_min: 90
+    jitter_min: 15
+
+analyze_bot:
+  enabled: false
+
+# 注意: 
+# - YOUR_CURATE_BOT_TWITTER_PASSWORD, YOUR_GDRIVE_FOLDER_ID, YOUR_AUTOPOST_BOT_TWITTER_PASSWORD 
+#   は、ご自身の正しい値に置き換える必要があります。
+# - file_paths の google_key_file や gemini_api.service_account_file は、
+#   config ディレクトリからの相対パスとして "config/file_name.json" のように記述しました。
+#   もしプロジェクトルートからの相対パスが正しい場合は、適宜修正が必要です。
+#   (config_loader.py が config ディレクトリにあることを想定しています) 
