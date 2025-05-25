@@ -177,4 +177,14 @@ docker/chrome_profiles/
 bots/curate_bot/chrome_profile/
 config/venv/
 chrome_profiles/
-.cache/chrome_profiles_test/ 
+.cache/chrome_profiles_test/
+
+# ChromeDriver
+chromedriver-mac-x64/
+chromedriver_mac64.zip
+*.zip
+
+# Configuration files (sensitive)
+config/gcp_service_account_key.json
+config/config.yml # コミットするかどうかユーザー判断 
+temp_env_values.txt 
