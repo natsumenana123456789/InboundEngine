@@ -1,95 +1,66 @@
+# InboundEngine 設定ファイル (簡素化版)
+# 実際に使用されている機能のみ記載
+
 common:
   log_level: "INFO"
   file_paths:
-    google_key_file: "config/gspread-key.json" # configディレクトリからの相対パスに修正
-  default_user_agents:
-    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+    google_key_file: "gspread-key.json"
 
-notion:
-  token: "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"
-  databases:
-    curation_main: "1fb422325cdd814299dade509fa60a5c" # 正しいDB ID
-
-gemini_api:
-  service_account_file: "config/gcp_service_account_key.json" # configディレクトリからの相対パス
-  api_key: "AIzaSyBaUiZr1XF-SrbUa2Uy69IO8ATpPpqiuro"
-  # model_name: "gemini-pro-vision"
-
-openai_api:
-  api_key: "DUMMY_API_KEY_FOR_PUSH"
-  # model_name: "gpt-4o"
-
+# X API認証情報（auto_post_botで使用）
 twitter_api:
-  bearer_token: "AAAAAAAAAAAAAAAAAAAAAOnVTwEAAAAA9ZhCEbFbnKgvwARyXLvf%2B%2FSqAxY%3D9DrZcAqkFVnMuN8LVVQMxzADNgh3K2uasf4bVyS13xvzzVdh4e"
-  consumer_key: "YOUR_CONSUMER_KEY_HERE"
-  consumer_secret: "YOUR_CONSUMER_SECRET_HERE"
-  access_token: "YOUR_ACCESS_TOKEN_HERE"
-  access_token_secret: "YOUR_ACCESS_TOKEN_SECRET_HERE"
-  user_id_cache:
-    pug_pua: "4550523914" # 例: 前回取得した pug_pua のID
-    # elonmusk: "44196397" # 他のユーザーも必要に応じて追加
-    # TwitterDev: "2244994945"
-    # ... 必要に応じて他のユーザーも追加
+  bearer_token: "AAAAAAAAAAAAAAAAAAAAAGcD2AEAAAAANOU1DRELP%2B5FrtPFxHr1AKLH2fY%3DGEQfzeDonlRmHsHBaCJsNPxz4XeSWV7fPcFpgkdHfEbk8adrT9"
+  consumer_key: "Y1OPAGo4bnenKVaPg9c4v7ZZv"
+  consumer_secret: "cCZ0KOSXzKO8dgvdeG5NK04XDSB6MsdcxcF3kC1wOSorPizGZ6"
+  access_token: "1606864928232857600-SVJ1fDLaISNXwFA2amUnQeNHFONIur"
+  access_token_secret: "Ft6NWOcBqF8V1rC3AI9W8HgWg2yRY81Y38utgijzfIqkP"
 
-curate_bot:
-  enabled: true
-  twitter_accounts:
-    - account_id: "curation_account_1"
-      email: "jptmarketing.takahashi@gmail.com"
-      username: "jadiAngkat"
-      password: "Wm3hMCUT"
-      profile_name_suffix: "curate_main"
-  active_curation_account_id: "curation_account_1"
-  user_agents: null # 実行時にcommon.default_user_agentsで補完
-  scraping:
-    extract_target: "YahooNewsTopics"
-    max_tweets: 30
-    mode: "target_only"
-    save_media_to_gdrive: true
-    ocr_enabled: true
-    use_gpt: true
-  google_drive:
-    enabled: true
-    folder_id: "YOUR_GDRIVE_FOLDER_ID"
-
+# 自動投稿Bot設定
 auto_post_bot:
-  enabled: true
-  source: "google_sheets"
+  slack_webhook_url: "https://hooks.slack.com/services/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"
+  sheet_name: "投稿ストック"
+  columns: ["ID", "投稿アカウント", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
   twitter_accounts:
-    - account_id: "autopost_account_1"
+    - account_id: "jadiAngkat"
       email: "jptmarketing.takahashi@gmail.com"
       username: "jadiAngkat"
-      password: "YOUR_AUTOPOST_BOT_TWITTER_PASSWORD"
-      profile_name_suffix: "autopost_main"
-  active_autopost_account_id: "autopost_account_1"
-  user_agents: null # 実行時にcommon.default_user_agentsで補完
-  posting_settings:
-    char_limit: { min: 135, max: 150 }
-    video_download_filename: "temp_video_for_post.mp4"
-  google_sheets_source:
-    enabled: true
-    sheet_name: "投稿DB群"
-    worksheet_name: "投稿データ"
-    columns: ["ID", "投稿日時", "本文", "画像/動画URL", "投稿者", "取得日時", "ステータス"]
-    batch_size: 100
-  scheduler:
-    enabled: true
-    script_name: "run_auto_post_bot.sh"
-    plist_dir: "~/Library/LaunchAgents"
-    label_prefix: "com.example.autopostbot"
-    base_time: "09:00"
-    mean_interval_min: 90
-    jitter_min: 15
+      password: "Wm3hMCUT"  # 参考用（現在はAPI認証のみ使用）
+      consumer_key: "jYJ4jjagTLCB6paNYyd9WjRKx"
+      consumer_secret: "tBb7kc4frNUbKzUW1fyZwKs7hPRyaqcP4YpmaT7vFSH2b7Giww"
+      access_token: "1669425142764810240-Tsvn4ivYdo9NfP9d2EEPxEiVo2MU81"
+      access_token_secret: "6s2wRZd7LjW6piCNopg3zvYgcIK82YB9LDCV6alhvGCRq"
+      google_sheets_source:
+        enabled: true
+        worksheet_name: "都内メンエス"
+    - account_id: "hinataHHHHHH"
+      email: "takahashi.jumpei.nari@gmail.com"
+      username: "hinataHHHHHH"
+      password: "Wm3hMCUT"  # 参考用（現在はAPI認証のみ使用）
+      consumer_key: "jYJ4jjagTLCB6paNYyd9WjRKx"
+      consumer_secret: "tBb7kc4frNUbKzUW1fyZwKs7hPRyaqcP4YpmaT7vFSH2b7Giww"
+      access_token: "1669425142764810240-Tsvn4ivYdo9NfP9d2EEPxEiVo2MU81"
+      access_token_secret: "6s2wRZd7LjW6piCNopg3zvYgcIK82YB9LDCV6alhvGCRq"
+      google_sheets_source:
+        enabled: true
+        worksheet_name: "都内セクキャバ"
 
+# キュレーションBot設定（将来使用予定）
+curate_bot:
+  enabled: false  # 現在は無効化
+
+# 分析Bot設定（将来使用予定）
 analyze_bot:
-  enabled: false
+  enabled: false  # 現在は無効化
 
-# 注意: 
-# - YOUR_CURATE_BOT_TWITTER_PASSWORD, YOUR_GDRIVE_FOLDER_ID, YOUR_AUTOPOST_BOT_TWITTER_PASSWORD 
-#   は、ご自身の正しい値に置き換える必要があります。
-# - file_paths の google_key_file や gemini_api.service_account_file は、
-#   config ディレクトリからの相対パスとして "config/file_name.json" のように記述しました。
-#   もしプロジェクトルートからの相対パスが正しい場合は、適宜修正が必要です。
-#   (config_loader.py が config ディレクトリにあることを想定しています) 
+# ========================================
+# 削除した不要な設定項目：
+# ========================================
+# - default_user_agents: 現在使用されていない
+# - notion: Notion連携は現在未使用
+# - gemini_api: OCR機能は現在未使用
+# - openai_api: 現在未使用
+# - user_id_cache: X API使用に不要
+# - curate_bot詳細設定: 現在無効化
+# - posting_settings詳細: デフォルト値で動作
+# - scheduler詳細設定: 現在schedule_posts.py で管理
+# - gspread_ocr_llm_settings: 現在未使用
+# - csv_to_notion_processor_settings: 現在未使用

@@ -1,6 +1,8 @@
 import datetime
 import logging
 import os
+import traceback
+from logging import StreamHandler
 
 def setup_logger(log_dir_name='logs', log_file_name='app.log', logger_name=None, level=logging.INFO):
     """
@@ -25,20 +27,33 @@ def setup_logger(log_dir_name='logs', log_file_name='app.log', logger_name=None,
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # フォーマッター
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # 詳細なフォーマッター
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+    )
 
-    # ファイルハンドラ
-    fh = logging.FileHandler(log_file_path)
+    # ファイルハンドラ（詳細なフォーマット）
+    fh = logging.FileHandler(log_file_path, encoding='utf-8')
     fh.setLevel(level)
-    fh.setFormatter(formatter)
+    fh.setFormatter(detailed_formatter)
     logger.addHandler(fh)
 
-    # コンソールハンドラ
-    ch = logging.StreamHandler()
+    # コンソールハンドラ（簡潔なフォーマット）
+    ch = StreamHandler()
     ch.setLevel(level)
-    ch.setFormatter(formatter)
+    ch.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(ch)
+    
+    # flushを即時実行するためのラッパー
+    class FlushOnEmitHandler(logging.Handler):
+        def __init__(self, handler):
+            super().__init__()
+            self.handler = handler
+        def emit(self, record):
+            self.handler.emit(record)
+            self.handler.flush()
+    # 既存のハンドラをflush即時化
+    logger.handlers = [FlushOnEmitHandler(h) for h in logger.handlers]
     
     return logger
 
@@ -48,19 +63,34 @@ def get_logger(logger_name=None):
     """
     logger = logging.getLogger(logger_name)
     if not logger.hasHandlers(): # まだハンドラがなければデフォルト設定
-        # ここでの log_dir_name は呼び出し元のスクリプトの位置に依存しないように注意
-        # 各ボットの main.py などから呼び出されることを想定し、
-        # setup_logger に渡す log_dir_name はプロジェクトルートからの相対パスが良い
-        # もしくは、各ボットの main で setup_logger を呼び出す際、
-        # ボットごとのログディレクトリを指定する。
-        # ここではシンプルにプロジェクト直下の logs を想定
         return setup_logger(logger_name=logger_name)
     return logger
 
-# auto_post_bot から移動してきた log 関数 (get_logger を使うように変更も可能)
-def simple_log(message):
-    now = datetime.datetime.now().strftime("%H:%M:%S")
-    print(f"[{now}] {message}")
+def log_error(logger, message, exc_info=True):
+    """
+    エラーログを出力する際のヘルパー関数。
+    スタックトレースを含む詳細なエラー情報を出力する。
+    """
+    if exc_info:
+        logger.error(f"{message}\n{traceback.format_exc()}")
+    else:
+        logger.error(message)
+
+def log_debug_with_context(logger, message, **context):
+    """
+    デバッグログを出力する際のヘルパー関数。
+    コンテキスト情報を含めて出力する。
+    """
+    context_str = " ".join([f"{k}={v}" for k, v in context.items()])
+    logger.debug(f"{message} | Context: {context_str}")
+
+def log_info_with_context(logger, message, **context):
+    """
+    情報ログを出力する際のヘルパー関数。
+    コンテキスト情報を含めて出力する。
+    """
+    context_str = " ".join([f"{k}={v}" for k, v in context.items()])
+    logger.info(f"{message} | Context: {context_str}")
 
 if __name__ == '__main__':
     # 使用例
@@ -68,12 +98,16 @@ if __name__ == '__main__':
     logger1.info("これはUtilLoggerTestからの情報ログです。")
     logger1.error("これはUtilLoggerTestからのエラーログです。")
 
-    # 既存のauto_post_botのlog関数の呼び出し例
-    simple_log("これはsimple_logからのメッセージです。")
+    # コンテキスト付きログの使用例
+    log_info_with_context(logger1, "処理開始", user_id="123", action="login")
+    try:
+        raise ValueError("テストエラー")
+    except Exception as e:
+        log_error(logger1, "エラーが発生しました", exc_info=True)
 
     # get_logger の使用例
     app_logger = get_logger('AppDefaultLogger')
     app_logger.info("これはAppDefaultLoggerからの情報ログです。")
 
-    another_logger = get_logger('AnotherModule') # 同じ名前で取得すれば同じインスタンス
+    another_logger = get_logger('AnotherModule')
     another_logger.warning("これはAnotherModuleからの警告ログです。") 

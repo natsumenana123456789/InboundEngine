@@ -5,7 +5,7 @@ import requests
 from PIL import Image
 import io
 import os
-from typing import Union
+from typing import Union, Tuple, Optional # Union, Tuple, Optional をインポート
 import yaml # For config loading in test block
 import random
 import logging # ログ出力用
@@ -31,25 +31,42 @@ except Exception as e:
     _user_agents = ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"]
 
 
-def ocr_with_gemini_vision(api_key: str, image_url: str, logger: logging.Logger = None) -> str: # Union[str, None] から str に変更
+def ocr_with_gemini_vision(api_key: str, image_path_or_url: str, logger: logging.Logger = None, is_url: bool = False) -> Tuple[Optional[str], Optional[str]]:
     """
-    指定された画像URLからGemini Visionモデルを使ってテキストを抽出する。
-    エラーが発生した場合は、エラー種別を示す文字列を返す。
+    指定された画像パスまたはURLからGemini Visionモデルを使ってテキストを抽出する。
+    戻り値は (抽出されたテキスト, エラーコード文字列) のタプル。
+    成功時は (テキスト, None)、エラー時は (None, エラーコード)。
+    Args:
+        api_key (str): Gemini APIキー。
+        image_path_or_url (str): 画像のローカルファイルパスまたはURL。
+        logger (logging.Logger, optional): ロガーインスタンス。
+        is_url (bool, optional): image_path_or_url がURLである場合にTrue。デフォルトはFalse (ローカルパス)。
     """
     log = logger if logger else logging.getLogger("ocr_with_gemini_vision")
+    img = None
+    source_identifier = image_path_or_url # ログ表示用
+
     try:
+        if is_url:
+            user_agent = random.choice(_user_agents) if _user_agents else "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+            headers = {'User-Agent': user_agent}
+            log.info(f"画像をダウンロード中: {image_path_or_url} (User-Agent: {user_agent})")
+            response = requests.get(image_path_or_url, stream=True, headers=headers, timeout=20)
+            response.raise_for_status()
+            img = Image.open(io.BytesIO(response.content))
+        else:
+            if not os.path.exists(image_path_or_url):
+                log.error(f"ローカル画像ファイルが見つかりません: {image_path_or_url}")
+                return None, "LOCAL_FILE_NOT_FOUND"
+            log.info(f"ローカル画像を読み込み中: {image_path_or_url}")
+            img = Image.open(image_path_or_url)
+
+        if img is None: # 上記のいずれの処理でもimgが設定されなかった場合
+            log.error(f"画像の読み込みに失敗しました: {source_identifier}")
+            return None, "IMAGE_LOAD_FAILED"
+
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash-latest')
-
-        user_agent = random.choice(_user_agents) if _user_agents else "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-        headers = {'User-Agent': user_agent}
-
-        log.info(f"画像をダウンロード中: {image_url} (User-Agent: {user_agent})")
-        response = requests.get(image_url, stream=True, headers=headers, timeout=20)
-        response.raise_for_status()
-
-        img = Image.open(io.BytesIO(response.content))
-
         generation_config = genai.types.GenerationConfig(temperature=0)
         api_response = model.generate_content(
             ["この画像からテキストを読み取ってください。", img],
@@ -60,40 +77,44 @@ def ocr_with_gemini_vision(api_key: str, image_url: str, logger: logging.Logger 
 
         if api_response.candidates and api_response.candidates[0].content.parts:
             extracted_text = "".join(part.text for part in api_response.candidates[0].content.parts if hasattr(part, 'text'))
-            log.info(f"  OCR成功 ({image_url}): \"{extracted_text[:100].strip()}...\"")
-            return extracted_text.strip()
+            log.info(f"  OCR成功 ({source_identifier}): \"{extracted_text[:100].strip()}...\"")
+            return extracted_text.strip(), None
         else:
-            log.warning(f"Geminiからのレスポンスにテキストが含まれていませんでした ({image_url})。画像にテキストがない可能性があります。")
-            return "" # テキストがない場合は空文字を返す
+            log.warning(f"Geminiからのレスポンスにテキストが含まれていませんでした ({source_identifier})。画像にテキストがない可能性があります。")
+            return "", None # テキストがない場合は空文字を返し、エラーなし
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 404:
-            log.error(f"画像が見つかりません (404エラー): {image_url}, {e}")
-            return "DOWNLOAD_FAILED_404"
+            log.error(f"画像が見つかりません (404エラー): {source_identifier}, {e}")
+            return None, "DOWNLOAD_FAILED_404"
         else:
-            log.error(f"画像のダウンロード中にHTTPエラーが発生しました (コード: {e.response.status_code}): {image_url}, {e}")
-            return f"DOWNLOAD_FAILED_HTTP_{e.response.status_code}"
+            log.error(f"画像のダウンロード中にHTTPエラーが発生しました (コード: {e.response.status_code}): {source_identifier}, {e}")
+            return None, f"DOWNLOAD_FAILED_HTTP_{e.response.status_code}"
     except requests.exceptions.Timeout:
-        log.error(f"画像のダウンロード中にタイムアウトしました: {image_url}")
-        return "DOWNLOAD_FAILED_TIMEOUT"
+        log.error(f"画像のダウンロード中にタイムアウトしました: {source_identifier}")
+        return None, "DOWNLOAD_FAILED_TIMEOUT"
     except requests.exceptions.ConnectionError:
-        log.error(f"画像のダウンロード中に接続エラーが発生しました: {image_url}")
-        return "DOWNLOAD_FAILED_CONNECTION"
+        log.error(f"画像のダウンロード中に接続エラーが発生しました: {source_identifier}")
+        return None, "DOWNLOAD_FAILED_CONNECTION"
     except requests.exceptions.RequestException as e: # その他のrequests由来のエラー
-        log.error(f"画像のダウンロード中に予期せぬリクエストエラーが発生しました: {image_url}, {e}")
-        return "DOWNLOAD_FAILED_OTHER_REQUEST"
+        log.error(f"画像のダウンロード中に予期せぬリクエストエラーが発生しました: {source_identifier}, {e}")
+        return None, "DOWNLOAD_FAILED_OTHER_REQUEST"
+    except FileNotFoundError: # Image.open(local_path) でファイルが見つからない場合 (is_url=False の分岐で既にチェックしているが念のため)
+        log.error(f"ローカル画像ファイルが見つかりません (FileNotFoundError): {source_identifier}")
+        return None, "LOCAL_FILE_NOT_FOUND"
     except Exception as e: # Gemini API処理中またはPillow処理中のエラー
-        log.error(f"Gemini Vision APIでのOCR処理中または画像処理中にエラーが発生しました ({image_url}): {e}", exc_info=True)
-        return "OCR_PROCESSING_ERROR"
+        log.error(f"Gemini Vision APIでのOCR処理中または画像処理中にエラーが発生しました ({source_identifier}): {e}", exc_info=True)
+        return None, "OCR_PROCESSING_ERROR"
 
-def correct_ocr_text_with_gemini(api_key: str, ocr_text: str, logger: logging.Logger = None, instruction: str = None) -> str: # Union[str, None] から str に変更
+def correct_ocr_text_with_gemini(api_key: str, ocr_text: str, logger: logging.Logger = None, instruction: str = None) -> Tuple[Optional[str], Optional[str]]:
     """
     Geminiモデルを使用してOCRテキストを補正する。
-    補正に失敗した場合は元のテキストを返す。
+    戻り値は (補正されたテキスト, エラーコード文字列) のタプル。
+    成功時は (テキスト, None)、エラー時は (元のテキスト, エラーコード)。補正不要時は(元のテキスト, None)
     """
     log = logger if logger else logging.getLogger("correct_ocr_text_with_gemini")
     if not ocr_text or ocr_text.strip() == "":
         log.info("補正対象のOCRテキストが空または空白のみです。処理をスキップします。")
-        return ocr_text
+        return ocr_text, None # 変更なし、エラーなし
 
     try:
         genai.configure(api_key=api_key)
@@ -129,13 +150,13 @@ OCRテキスト:
         if response.candidates and response.candidates[0].content.parts:
             corrected_text = "".join(part.text for part in response.candidates[0].content.parts if hasattr(part, 'text'))
             log.info(f"  補正成功。補正後テキスト（一部）: \"{corrected_text[:100]}...\"")
-            return corrected_text.strip()
+            return corrected_text.strip(), None
         else:
-            log.warning(f"Geminiからのレスポンスに補正済みテキストが含まれていませんでした。")
-            return ocr_text
+            log.warning(f"Geminiからのレスポンスに補正済みテキストが含まれていませんでした。元のテキストを返します。")
+            return ocr_text, "LLM_NO_CORRECTION_TEXT_IN_RESPONSE" 
     except Exception as e:
         log.error(f"Gemini API ({model._model_name if 'model' in locals() else 'N/A'}) でのOCRテキスト補正中にエラーが発生しました: {e}", exc_info=True)
-        return ocr_text
+        return ocr_text, "LLM_PROCESSING_ERROR"
 
 if __name__ == '__main__':
     # --- Test Logger Setup ---
@@ -162,35 +183,28 @@ if __name__ == '__main__':
         google_logo_url = "https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png"
 
         main_logger.info(f"--- テスト画像URL: {google_logo_url} ---")
-        ocr_result = ocr_with_gemini_vision(test_api_key, google_logo_url, logger=main_logger)
+        ocr_result, ocr_error_code = ocr_with_gemini_vision(test_api_key, google_logo_url, logger=main_logger, is_url=True)
 
-        # ocr_with_gemini_vision は None を返さなくなったので、 is not None のチェックは実質不要だが残しておく
-        if ocr_result is not None:
-            # f-string をシングルクォートで囲み、内部のダブルクォートはそのまま表示
+        if ocr_error_code:
+            main_logger.error(f'OCR処理でエラーが発生しました: {ocr_error_code}')
+        elif ocr_result is not None: # エラーがなく、結果がNoneでもない (空文字列の可能性はある)
             main_logger.info(f'OCR結果 (ocr_with_gemini_vision raw output):\n"{ocr_result}"')
-
-            error_keywords_check = ["DOWNLOAD_FAILED", "OCR_PROCESSING_ERROR"]
-            is_error_ocr_result = any(keyword in ocr_result for keyword in error_keywords_check) # ocr_resultが空文字の場合も考慮
-
-            if not is_error_ocr_result and ocr_result.strip():
+            if ocr_result.strip(): # OCR結果が空文字や空白のみでない場合のみ補正
                 main_logger.info("\n--- LLMによるOCR補正テスト (correct_ocr_text_with_gemini) ---")
-                corrected_text = correct_ocr_text_with_gemini(
+                corrected_text, llm_error_code = correct_ocr_text_with_gemini(
                     test_api_key,
                     ocr_result,
                     logger=main_logger
                 )
-                if corrected_text != ocr_result:
-                    # f-string をシングルクォートで囲み、内部のダブルクォートはそのまま表示
+                if llm_error_code:
+                    main_logger.error(f'LLM補正処理でエラーが発生しました: {llm_error_code}。元のOCR結果: "{ocr_result}"')
+                elif corrected_text != ocr_result:
                     main_logger.info(f'LLMによる補正後テキスト:\n"{corrected_text}"')
                 else:
-                    main_logger.info("LLMによる補正結果は元のテキストと同じか、補正に失敗/スキップされました。")
-            elif is_error_ocr_result:
-                # f-string をダブルクォートで囲み、内部のシングルクォートはそのまま表示
-                main_logger.info(f"OCR結果がエラーコード ('{ocr_result}') のため、LLMによる補正はスキップします。")
-            else: # OCR結果が空だがエラーではない場合
-                main_logger.info("OCR結果が空のため、LLMによる補正はスキップします。")
+                    main_logger.info("LLMによる補正結果は元のテキストと同じか、補正がスキップされました。")
         else:
-            # 通常ここには到達しないはず
-            main_logger.error("OCR処理で致命的なエラーが発生しました (結果がNone)。")
+                main_logger.info("OCR結果が空または空白のみのため、LLMによる補正はスキップします。")
+        else: # ocr_result is None and ocr_error_code is None (通常このケースは無いはずだが念のため)
+            main_logger.error("OCR処理で予期せぬ結果 (テキストもエラーコードもNone) となりました。")
 
         main_logger.info("\n--- テスト完了 ---")

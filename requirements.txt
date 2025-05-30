@@ -1,5 +1,32 @@
-openai
+# InboundEngine 必要最小限の依存関係
+# 実際に使用されているパッケージのみ
+
+# 設定ファイル読み込み
 PyYAML
+
+# HTTP通信
 requests
+
+# X API 連携
+tweepy
+
+# Google Sheets 連携
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+gspread
+oauth2client
+
+# 画像・動画処理
 Pillow
-tweepy 
+
+# 日付処理
+python-dateutil
+
+# ====================================
+# 削除した不要な依存関係：
+# ====================================
+# openai - 現在未使用
+# pytesseract - OCR機能は現在未使用
+# snscrape - キュレーション機能は現在無効化 

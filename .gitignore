@@ -177,7 +177,7 @@ docker/chrome_profiles/
 bots/curate_bot/chrome_profile/
 config/venv/
 chrome_profiles/
-.cache/chrome_profiles_test/
+.cache/chrome_profiles_test/ 
 
 # ChromeDriver
 chromedriver-mac-x64/

@@ -2,6 +2,8 @@ import os
 import random
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 # from utils.logger import get_logger # 循環参照を避けるため、ここでは直接呼び出さない
 
 # logger = get_logger(__name__) # モジュール名でロガーを取得
@@ -14,6 +16,7 @@ def get_driver(user_agent: str = None, profile_path: str = None, headless: bool 
     """
     共通のWebDriver初期化処理。
     User-Agent文字列とプロファイルパスを直接受け取るように変更。
+    webdriver-managerでchromedriverを自動管理。
     """
     options = Options()
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -47,10 +50,11 @@ def get_driver(user_agent: str = None, profile_path: str = None, headless: bool 
         print("[WebDriverUtils] プロファイルパスが指定されなかったため、デフォルトプロファイルが使用されます。")
 
     try:
-        driver = webdriver.Chrome(options=options)
-        # navigator.webdriver プロパティを削除して自動化検出を回避する試み
+        # webdriver-managerでchromedriverを自動ダウンロード・管理
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
         driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        print("[WebDriverUtils] WebDriverの初期化が完了しました。")
+        print("[WebDriverUtils] WebDriverの初期化が完了しました。(webdriver-manager使用)")
         return driver
     except Exception as e:
         print(f"[WebDriverUtils] WebDriverの初期化中にエラーが発生しました: {e}")
