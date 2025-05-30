@@ -503,7 +503,7 @@ python schedule_posts.py
 
 #### **コスト**: 🟢 **完全無料**
 - プライベートリポジトリでも月2,000分無料
-- 1日3回実行 = 月約180分 → **実質無料**
+- 1日4回実行 = 月約240分 → **実質無料**
 
 #### **運用の簡単さ**: 🟢 **最簡単**
 - Git push だけで自動デプロイ
@@ -515,6 +515,77 @@ python schedule_posts.py
 - 手動実行ボタンあり
 - 自動スケーリング
 
+### 🚀 GitHub Actions 完全デプロイ手順
+
+#### 1. リポジトリ準備
+```bash
+# プライベートリポジトリ作成（機密情報があるため）
+gh repo create InboundEngine-Bot --private
+git remote add origin https://github.com/yourusername/InboundEngine-Bot.git
+git push -u origin main
+```
+
+#### 2. GitHub Secrets 設定 ⚙️
+`Settings > Secrets and variables > Actions` で以下を設定:
+
+**🔑 必須Secrets:**
+```
+GOOGLE_SHEETS_KEY: (gspread-key.json の内容をまるごと)
+SLACK_WEBHOOK_URL: (Slack Webhook URL)
+TWITTER_BEARER_TOKEN: (X API Bearer Token)
+TWITTER_CONSUMER_KEY: (X API Consumer Key)
+TWITTER_CONSUMER_SECRET: (X API Consumer Secret)
+TWITTER_ACCESS_TOKEN: (X API Access Token)
+TWITTER_ACCESS_TOKEN_SECRET: (X API Access Token Secret)
+ACCOUNT1_EMAIL: (jadiAngkatのメールアドレス)
+ACCOUNT2_EMAIL: (hinataHHHHHHのメールアドレス)
+```
+
+#### 3. 自動実行スケジュール 📅
+設定済みの実行スケジュール:
+- **毎朝8時**: スケジュール生成 + Slack通知
+- **毎日10時、14時、18時、21時**: 自動投稿実行
+- **Git push時**: 「スクリプトが更新されました。」Slack通知
+
+#### 4. 手動実行オプション 🔧
+GitHub Actions画面で「Run workflow」ボタンから:
+- `post`: 投稿実行
+- `schedule`: 通常スケジュール生成
+- `schedule-now`: 現在時刻以降でスケジュール生成
+
+#### 5. Slack通知の詳細 📱
+
+**📢 Git Push通知:**
+```
+🔄 スクリプトが更新されました。
+Repository: user/InboundEngine-Bot
+Commit: feat: 新機能追加
+Author: user
+Branch: main
+```
+
+**📅 スケジュール通知（改善版）:**
+```
+📅 自動投稿スケジュール
+
+• jadiAngkat: 05/30 17:33 (約1時間54分後)
+• hinataHHHHHH: 05/30 21:27 (約5時間48分後)
+
+📊 合計2件 | 2アカウント
+⏰ 生成時刻: 2025-05-30 15:38:15
+```
+
+**🌙 夜間実行時の通知:**
+```
+🌙 夜間スケジュール生成完了 （営業時間外のため翌日に設定）
+
+• jadiAngkat: 05/31 11:15 (約12時間37分後)
+• hinataHHHHHH: 05/31 16:42 (約18時間4分後)
+
+📊 合計2件 | 2アカウント | 本日0件・翌日2件
+⏰ 生成時刻: 2025-05-30 23:15:30
+```
+
 ### セットアップ手順
 
 #### 1. リポジトリ準備
@@ -525,133 +596,66 @@ git remote add origin https://github.com/yourusername/InboundEngine-Bot.git
 git push -u origin main
 ```
 
-#### 2. GitHub Secrets 設定
+#### 2. GitHub Secrets 設定 ⚙️
 `Settings > Secrets and variables > Actions` で以下を設定:
 
+**🔑 必須Secrets:**
 ```
 GOOGLE_SHEETS_KEY: (gspread-key.json の内容をまるごと)
 SLACK_WEBHOOK_URL: (Slack Webhook URL)
+TWITTER_BEARER_TOKEN: (X API Bearer Token)
 TWITTER_CONSUMER_KEY: (X API Consumer Key)
 TWITTER_CONSUMER_SECRET: (X API Consumer Secret)
 TWITTER_ACCESS_TOKEN: (X API Access Token)
 TWITTER_ACCESS_TOKEN_SECRET: (X API Access Token Secret)
-TWITTER_BEARER_TOKEN: (X API Bearer Token)
+ACCOUNT1_EMAIL: (jadiAngkatのメールアドレス)
+ACCOUNT2_EMAIL: (hinataHHHHHHのメールアドレス)
 ```
 
-#### 3. Workflow ファイル作成
-`.github/workflows/auto-post.yml`:
+#### 3. 自動実行スケジュール 📅
+設定済みの実行スケジュール:
+- **毎朝8時**: スケジュール生成 + Slack通知
+- **毎日10時、14時、18時、21時**: 自動投稿実行
+- **Git push時**: 「スクリプトが更新されました。」Slack通知
 
-```yaml
-name: Auto Post Bot
+#### 4. 手動実行オプション 🔧
+GitHub Actions画面で「Run workflow」ボタンから:
+- `post`: 投稿実行
+- `schedule`: 通常スケジュール生成
+- `schedule-now`: 現在時刻以降でスケジュール生成
 
-on:
-  schedule:
-    # 毎朝8時にスケジュール生成
-    - cron: '0 23 * * *'  # UTC 23:00 = JST 8:00
-    # 毎日9時、13時、17時に投稿
-    - cron: '0 0,4,8 * * *'  # UTC 0,4,8 = JST 9,13,17
-  workflow_dispatch:  # 手動実行
+#### 5. Slack通知の詳細 📱
 
-jobs:
-  schedule:
-    if: github.event.schedule == '0 23 * * *' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    - name: Install dependencies
-      run: pip install -r requirements.txt
-    - name: Create config files
-      run: |
-        mkdir -p config
-        cat > config/config.yml << EOF
-        common:
-          log_level: "INFO"
-          file_paths:
-            google_key_file: "gspread-key.json"
-        twitter_api:
-          bearer_token: "${{ secrets.TWITTER_BEARER_TOKEN }}"
-          consumer_key: "${{ secrets.TWITTER_CONSUMER_KEY }}"
-          consumer_secret: "${{ secrets.TWITTER_CONSUMER_SECRET }}"
-          access_token: "${{ secrets.TWITTER_ACCESS_TOKEN }}"
-          access_token_secret: "${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}"
-        auto_post_bot:
-          slack_webhook_url: "${{ secrets.SLACK_WEBHOOK_URL }}"
-          sheet_name: "投稿ストック"
-          columns: ["ID", "投稿アカウント", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
-          twitter_accounts:
-            - account_id: "jadiAngkat"
-              consumer_key: "${{ secrets.TWITTER_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.TWITTER_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.TWITTER_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内メンエス"
-            - account_id: "hinataHHHHHH"
-              consumer_key: "${{ secrets.TWITTER_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.TWITTER_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.TWITTER_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内セクキャバ"
-        EOF
-        echo '${{ secrets.GOOGLE_SHEETS_KEY }}' > config/gspread-key.json
-    - name: Generate schedule
-      run: python schedule_posts.py
-
-  post:
-    if: github.event.schedule != '0 23 * * *' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    - name: Install FFmpeg
-      run: sudo apt-get update && sudo apt-get install -y ffmpeg
-    - name: Install dependencies
-      run: pip install -r requirements.txt
-    - name: Create config files
-      run: |
-        mkdir -p config
-        cat > config/config.yml << EOF
-        # (上記と同じ設定)
-        EOF
-        echo '${{ secrets.GOOGLE_SHEETS_KEY }}' > config/gspread-key.json
-    - name: Run auto post
-      run: python -m bots.auto_post_bot.post_tweet
+**📢 Git Push通知:**
+```
+🔄 スクリプトが更新されました。
+Repository: user/InboundEngine-Bot
+Commit: feat: 新機能追加
+Author: user
+Branch: main
 ```
 
-#### 4. 本番運用開始
-```bash
-git add .github/workflows/auto-post.yml
-git commit -m "Add GitHub Actions workflow"
-git push
+**📅 スケジュール通知（改善版）:**
+```
+📅 自動投稿スケジュール
+
+• jadiAngkat: 05/30 17:33 (約1時間54分後)
+• hinataHHHHHH: 05/30 21:27 (約5時間48分後)
+
+📊 合計2件 | 2アカウント
+⏰ 生成時刻: 2025-05-30 15:38:15
 ```
 
-### 🔧 その他のクラウドオプション
-
-#### **Railway** ($5/月の無料クレジット)
-```bash
-npm install -g @railway/cli
-railway login
-railway init
-railway up
+**🌙 夜間実行時の通知:**
 ```
+🌙 夜間スケジュール生成完了 （営業時間外のため翌日に設定）
 
-#### **AWS EC2 t2.micro** (1年間無料)
-- より多くの設定が必要
-- Linux サーバー管理スキル必要
+• jadiAngkat: 05/31 11:15 (約12時間37分後)
+• hinataHHHHHH: 05/31 16:42 (約18時間4分後)
 
-#### **Google Cloud Run** (月200万リクエスト無料)
-- Dockerfile が必要
-- GCP の設定が複雑
+📊 合計2件 | 2アカウント | 本日0件・翌日2件
+⏰ 生成時刻: 2025-05-30 23:15:30
+```
 
 ### ✅ GitHub Actions の利点
 

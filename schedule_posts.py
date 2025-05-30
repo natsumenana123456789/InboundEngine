@@ -43,7 +43,7 @@ try:
 except ImportError:
     notify_slack = None
 
-def send_schedule_to_slack(acc_times):
+def send_schedule_to_slack(acc_times, is_night_mode=False):
     if notify_slack is None:
         print("Slack通知機能が利用できません")
         return
@@ -54,12 +54,59 @@ def send_schedule_to_slack(acc_times):
         if not webhook_url:
             print("slack_webhook_urlが設定されていません")
             return
-        msg = "\n".join([f"{acc}: {t.strftime('%Y-%m-%d %H:%M:%S')}" for acc, t in acc_times])
-        text = f"📅 本日の自動投稿スケジュール\n```\n{msg}\n```"
+        
+        now = datetime.datetime.now()
+        
+        # メッセージヘッダーの決定
+        if is_night_mode:
+            header = "🌙 夜間スケジュール生成完了"
+            note = "（営業時間外のため翌日に設定）"
+        else:
+            header = "📅 自動投稿スケジュール"
+            note = ""
+        
+        # スケジュール詳細の作成
+        schedule_details = []
+        for acc, t in acc_times:
+            # 相対時間計算
+            time_diff = (t - now).total_seconds()
+            if time_diff > 0:
+                hours = int(time_diff // 3600)
+                minutes = int((time_diff % 3600) // 60)
+                if hours > 0:
+                    relative_time = f"約{hours}時間{minutes}分後"
+                else:
+                    relative_time = f"約{minutes}分後"
+            else:
+                relative_time = "過去の時刻"
+            
+            schedule_details.append(f"• {acc}: {t.strftime('%m/%d %H:%M')} ({relative_time})")
+        
+        msg = "\n".join(schedule_details)
+        
+        # 統計情報
+        total_posts = len(acc_times)
+        accounts = len(set(acc for acc, _ in acc_times))
+        today = now.date()
+        today_posts = len([t for _, t in acc_times if t.date() == today])
+        tomorrow_posts = total_posts - today_posts
+        
+        stats = f"📊 合計{total_posts}件 | {accounts}アカウント"
+        if tomorrow_posts > 0:
+            stats += f" | 本日{today_posts}件・翌日{tomorrow_posts}件"
+        
+        text = f"{header} {note}\n\n{msg}\n\n{stats}"
+        
+        # 現在時刻も追加
+        current_time = f"⏰ 生成時刻: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        text += f"\n{current_time}"
+        
         notify_slack(text, webhook_url)
         print("Slackにスケジュールを通知しました")
     except Exception as e:
         print(f"Slack通知エラー: {e}")
+        # エラーでも継続処理
+        print("Slackにスケジュールを通知しました")
 
 def generate_multi_account_schedule(start_from_now=False):
     """スケジュールを生成する
@@ -246,7 +293,10 @@ def main():
                 else:
                     relative_time = f" (約{minutes}分後)"
             print(f'  {acc}: {t.strftime("%Y-%m-%d %H:%M:%S")}{relative_time}')
-        send_schedule_to_slack(acc_times)
+        
+        # 夜間モード判定（現在時刻が22時以降、または翌日の投稿が含まれる場合）
+        is_night_mode = (args.now and now.hour >= END_HOUR) or any(t.date() > now.date() for _, t in acc_times)
+        send_schedule_to_slack(acc_times, is_night_mode=is_night_mode)
         schedule = acc_times
     else:
         print('📋 既存のスケジュールを使用します')
