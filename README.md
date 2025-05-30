@@ -94,12 +94,44 @@ python schedule_posts.py
 # 自動スケジュール生成（初回実行時）
 python schedule_posts.py
 
+# 現在時刻以降でスケジュール生成（中途半端な時間からでも対応）
+python schedule_posts.py --now
+
+# 既存スケジュールを強制的に再生成
+python schedule_posts.py --force-regenerate
+
 # 手動投稿実行
 python -m bots.auto_post_bot.post_tweet
 
 # または、定期実行の場合
 # crontabで設定された時間に自動実行される
 ```
+
+### 2.1. 🕐 中途半端な時間からのスケジュール生成
+
+**例：午後3時38分に始める場合**
+```bash
+# 現在時刻（15:38）以降でスケジュール生成
+python schedule_posts.py --now
+
+# 実行例：
+# ⏰ 現在時刻 15:38 以降でスケジュール生成します
+# ✅ 新しいスケジュールを作成しました:
+#   hinataHHHHHH: 2025-05-30 17:33:00 (約1時間54分後)
+#   jadiAngkat: 2025-05-30 21:27:00 (約5時間48分後)
+```
+
+**営業時間外（22時以降）の場合**
+```bash
+python schedule_posts.py --now
+# ⏰ 現在時刻 23:15 は営業時間外です
+# 📅 翌日 (2025-05-31) の 10:00 からスケジュール生成します
+```
+
+**オプション一覧**
+- `--now`: 現在時刻以降でスケジュール生成
+- `--force-regenerate`: 既存スケジュールがあっても強制再生成
+- `--mark-executed ACCOUNT DATETIME`: 指定投稿を実行済みにマーク
 
 ### 3. 結果確認
 - **Slack**: 投稿成功/失敗の通知とスケジュール通知を確認
