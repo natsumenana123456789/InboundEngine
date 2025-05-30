@@ -743,48 +743,11 @@ X（Twitter）での自動投稿を行うシステムです。Google スプレ�
 - 📹 動画メタデータ変換（FFmpeg）
 - 🔀 ランダムスペース挿入（検出回避）
 - 📱 Slack 通知
-- 🛡️ ハイブリッドアカウント管理（セキュア）
+- 🧵 ツリー投稿対応（長文自動分割）
 
-## 🔐 ハイブリッドアカウント管理システム
+## 🔧 アカウント管理
 
-セキュリティとユーザビリティを両立した新しいアカウント管理方式です。
-
-### 📊 情報の分離原則
-
-| 情報種別 | 保存場所 | 理由 |
-|---------|---------|------|
-| **非機密情報** | 📊 Google スプレッドシート | 運用者が簡単に編集可能 |
-| **機密情報** | 🔒 環境変数/GitHub Secrets | セキュリティを確保 |
-
-### 📋 スプレッドシート設定（非機密）
-
-**シート名**: `システム管理`  
-**ワークシート名**: `アカウント設定`
-
-| 列名 | 内容例 | 必須 |
-|------|--------|------|
-| アカウントID | `jadiAngkat` | ✅ |
-| 表示名 | `ジャディアン垢` | ❌ |
-| ワークシート名 | `都内メンエス` | ✅ |
-| 有効 | `TRUE` / `FALSE` | ✅ |
-| スケジュール有効 | `TRUE` / `FALSE` | ✅ |
-| 1日投稿回数 | `1` | ❌ (デフォルト:1) |
-| 優先度 | `100` | ❌ (デフォルト:100) |
-| 備考 | `テスト用アカウント` | ❌ |
-
-### 🔑 環境変数設定（機密）
-
-**命名規則**: `TWITTER_{アカウントID大文字}_{設定項目}`
-
-```bash
-# jadiAngkat アカウント用
-TWITTER_JADIANGKAT_CONSUMER_KEY=your_consumer_key_here
-TWITTER_JADIANGKAT_CONSUMER_SECRET=your_consumer_secret_here
-TWITTER_JADIANGKAT_ACCESS_TOKEN=your_access_token_here
-TWITTER_JADIANGKAT_ACCESS_TOKEN_SECRET=your_access_token_secret_here
-TWITTER_JADIANGKAT_EMAIL=email@example.com
-TWITTER_JADIANGKAT_USERNAME=jadiAngkat
-```
+すべてのアカウント情報は `config/config.yml` で一元管理されます。
 
 ### 🔄 新しいアカウント追加手順
 
@@ -793,62 +756,56 @@ TWITTER_JADIANGKAT_USERNAME=jadiAngkat
 2. 新しいアプリケーションを作成
 3. API Keys と Access Tokens を取得
 
-#### 2. 環境変数の設定
-**GitHub Actions の場合**:
-1. リポジトリの **Settings** → **Secrets and variables** → **Actions**
-2. **New repository secret** で以下を追加：
+#### 2. config.yml への追加
+`config/config.yml` の `twitter_accounts` セクションに追加：
 
-```
-TWITTER_NEWACCOUNT_CONSUMER_KEY
-TWITTER_NEWACCOUNT_CONSUMER_SECRET
-TWITTER_NEWACCOUNT_ACCESS_TOKEN
-TWITTER_NEWACCOUNT_ACCESS_TOKEN_SECRET
-TWITTER_NEWACCOUNT_EMAIL
-TWITTER_NEWACCOUNT_USERNAME
-```
-
-**ローカル環境の場合**:
-```bash
-export TWITTER_NEWACCOUNT_CONSUMER_KEY=your_consumer_key
-export TWITTER_NEWACCOUNT_CONSUMER_SECRET=your_consumer_secret
-export TWITTER_NEWACCOUNT_ACCESS_TOKEN=your_access_token
-export TWITTER_NEWACCOUNT_ACCESS_TOKEN_SECRET=your_access_token_secret
-export TWITTER_NEWACCOUNT_EMAIL=your_email@example.com
-export TWITTER_NEWACCOUNT_USERNAME=newAccount
+```yaml
+auto_post_bot:
+  twitter_accounts:
+    - account_id: "新アカウント名"
+      email: "メールアドレス"
+      username: "ユーザー名"
+      password: "パスワード（参考用）"
+      consumer_key: "取得したConsumer Key"
+      consumer_secret: "取得したConsumer Secret"
+      access_token: "取得したAccess Token"
+      access_token_secret: "取得したAccess Token Secret"
+      google_sheets_source:
+        enabled: true
+        worksheet_name: "ワークシート名"
 ```
 
-#### 3. スプレッドシートに追加
-「システム管理」シートの「アカウント設定」ワークシートに行を追加：
-
-| アカウントID | 表示名 | ワークシート名 | 有効 | スケジュール有効 | 1日投稿回数 | 優先度 |
-|-------------|--------|---------------|------|-----------------|------------|-------|
-| newAccount  | 新垢   | 新しいワークシート名 | TRUE | TRUE | 1 | 100 |
-
-#### 4. 投稿データ用ワークシートの準備
+#### 3. 投稿データ用ワークシートの準備
 1. Google Drive で新しいワークシートを作成
 2. 投稿データを追加（[投稿データ追加手順](#-投稿データ追加手順) 参照）
 3. 適切な共有設定を行う
 
+#### 4. Git でデプロイ
+```bash
+git add config/config.yml
+git commit -m "新しいアカウント追加: 新アカウント名"
+git push
+```
+
 #### 5. 動作確認
 ```bash
 # 特定アカウントでテスト実行
-python3 bots/auto_post_bot/post_tweet.py --account newAccount
+python3 bots/auto_post_bot/post_tweet.py --account 新アカウント名
 
 # スケジューラでの確認
 python3 schedule_posts.py
 ```
 
-## 🛡️ セキュリティ上の利点
+### 🎛️ 運用上の利点
 
-1. **API認証情報の分離**: 機密情報がスプレッドシートに保存されない
-2. **アクセス権限の制限**: スプレッドシート編集者は機密情報にアクセス不可
-3. **監査証跡**: GitHub Actions のログで実行履歴を追跡可能
-4. **ロールベース管理**: 
-   - 運用者: スプレッドシート編集のみ
-   - 開発者: 環境変数とコード管理
-5. **誤操作防止**: API認証情報の誤公開リスクを排除
+1. **シンプル管理**: config.yml だけでアカウント設定が完結
+2. **バージョン管理**: Git でアカウント追加履歴を管理
+3. **即座反映**: Git push で設定がすぐに有効
+4. **分かりやすい**: 情報が分散せず、全てがconfig.ymlに集約
 
-### ⚠️ 文字数制限について
+### ⚠️ ツリー投稿機能
+
+長文投稿（270字超過）は自動的にツリー投稿（スレッド投稿）に分割されます。
 
 - **Twitter文字数制限**: 280字
 - **システム制限**: 270字（安全マージン）
@@ -872,11 +829,3 @@ python3 schedule_posts.py
 - **メディア添付**: 最初のツイートにのみ画像・動画を添付
 - **投稿間隔**: ツイート間に2秒の間隔を設定
 - **連続投稿**: 返信形式でスレッドを自動構成
-
-## 🎛️ 運用上の利点
-
-1. **コード変更不要**: アカウント追加時にソースコード修正が不要
-2. **即座反映**: スプレッドシート更新で設定がすぐに有効
-3. **非技術者対応**: プログラミング知識なしでアカウント管理可能
-4. **可視性**: 全アカウントの状態をスプレッドシートで一覧確認
-5. **簡単な一時停止**: スプレッドシートで「有効」を FALSE に変更するだけ

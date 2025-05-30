@@ -2,7 +2,6 @@ import os
 import datetime
 import random
 
-# ACCOUNTS = ['jadiAngkat', 'account2', 'account3']  # 複数アカウント名
 POSTS_PER_ACCOUNT = 1  # 1アカウントあたりの投稿回数
 START_HOUR = 10
 END_HOUR = 22
@@ -10,24 +9,12 @@ MIN_INTERVAL_MINUTES = 10
 SCHEDULE_FILE = 'logs/schedule.txt'
 EXECUTED_FILE = 'logs/executed.txt'
 
-# ハイブリッドアカウント管理システムをインポート
+# config.ymlからアカウントを読み取り
 try:
-    from config.account_management import AccountManager
     from config import config_loader
-    account_manager = AccountManager()
     
     def get_accounts():
-        """スプレッドシート、またはconfig.ymlから有効なアカウントIDリストを取得"""
-        # 1. ハイブリッドシステムを試行
-        try:
-            scheduler_accounts = account_manager.get_scheduler_accounts()
-            if scheduler_accounts:
-                print(f"ハイブリッドシステムから {len(scheduler_accounts)} 個のアカウントを取得: {scheduler_accounts}")
-                return scheduler_accounts
-        except Exception as e:
-            print(f"ハイブリッドシステムからの取得に失敗: {e}")
-        
-        # 2. config.ymlからフォールバック
+        """config.ymlから有効なアカウントIDリストを取得"""
         try:
             config = config_loader.get_bot_config("auto_post_bot")
             twitter_accounts = config.get('twitter_accounts', [])
@@ -36,33 +23,18 @@ try:
                 account_ids = [acc for acc in account_ids if acc]  # 空でないものだけ
                 print(f"config.ymlから {len(account_ids)} 個のアカウントを取得: {account_ids}")
                 return account_ids
-        except Exception as e:
-            print(f"config.ymlからの取得に失敗: {e}")
-            
-        # 3. 最終フォールバック
-        print("⚠️ 全ての方法でアカウント取得に失敗。固定リストを使用")
-        return ['jadiAngkat', 'account2', 'account3']
-    
-    print("ハイブリッドアカウント管理システムを使用します（config.yml対応）")
-except ImportError:
-    # フォールバック: 従来の固定リスト
-    def get_accounts():
-        try:
-            from config import config_loader
-            config = config_loader.get_bot_config("auto_post_bot")
-            twitter_accounts = config.get('twitter_accounts', [])
-            if twitter_accounts:
-                account_ids = [acc.get('username') or acc.get('account_id') for acc in twitter_accounts]
-                account_ids = [acc for acc in account_ids if acc]
-                print(f"config.ymlから {len(account_ids)} 個のアカウントを取得: {account_ids}")
-                return account_ids
+            else:
+                print("⚠️ config.ymlにtwitter_accountsが設定されていません")
+                return []
         except Exception as e:
             print(f"config.yml読み込みエラー: {e}")
-        
-        print("⚠️ 固定アカウントリストを使用します")
-        return ['jadiAngkat', 'account2', 'account3']
+            return []
     
-    print("⚠️ ハイブリッドシステムが利用できません。config.yml方式を使用します")
+    print("config.ymlからアカウント情報を読み取ります")
+except ImportError:
+    print("⚠️ config_loaderのインポートに失敗しました")
+    def get_accounts():
+        return []
 
 # Slack通知用
 try:
@@ -74,10 +46,19 @@ def send_schedule_to_slack(acc_times):
     if notify_slack is None:
         print("Slack通知機能が利用できません")
         return
-    msg = "\n".join([f"{acc}: {t.strftime('%Y-%m-%d %H:%M:%S')}" for acc, t in acc_times])
-    text = f"本日の自動投稿スケジュール\n```\n{msg}\n```"
-    notify_slack(text)
-    print("Slackにスケジュールを通知しました")
+    try:
+        from config import config_loader
+        config = config_loader.get_bot_config("auto_post_bot")
+        webhook_url = config.get("slack_webhook_url")
+        if not webhook_url:
+            print("slack_webhook_urlが設定されていません")
+            return
+        msg = "\n".join([f"{acc}: {t.strftime('%Y-%m-%d %H:%M:%S')}" for acc, t in acc_times])
+        text = f"📅 本日の自動投稿スケジュール\n```\n{msg}\n```"
+        notify_slack(text, webhook_url)
+        print("Slackにスケジュールを通知しました")
+    except Exception as e:
+        print(f"Slack通知エラー: {e}")
 
 def generate_multi_account_schedule():
     today = datetime.date.today()
