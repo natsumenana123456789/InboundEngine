@@ -3,16 +3,45 @@ import datetime
 import random
 import argparse
 
-POSTS_PER_ACCOUNT = 1  # 1アカウントあたりの投稿回数
-START_HOUR = 10
-END_HOUR = 22
-MIN_INTERVAL_MINUTES = 10
-SCHEDULE_FILE = 'logs/schedule.txt'
-EXECUTED_FILE = 'logs/executed.txt'
-
 # config.ymlからアカウントを読み取り
 try:
     from config import config_loader
+    
+    def get_schedule_settings():
+        """config.ymlからスケジュール設定を取得"""
+        try:
+            config = config_loader.get_bot_config("auto_post_bot")
+            schedule_settings = config.get('schedule_settings', {})
+            posting_settings = config.get('posting_settings', {})
+            
+            return {
+                'POSTS_PER_ACCOUNT': posting_settings.get('posts_per_account', 1),
+                'START_HOUR': schedule_settings.get('start_hour', 10),
+                'END_HOUR': schedule_settings.get('end_hour', 22),
+                'MIN_INTERVAL_MINUTES': schedule_settings.get('min_interval_minutes', 10),
+                'SCHEDULE_FILE': schedule_settings.get('schedule_file', 'logs/schedule.txt'),
+                'EXECUTED_FILE': schedule_settings.get('executed_file', 'logs/executed.txt')
+            }
+        except Exception as e:
+            print(f"config.yml読み込みエラー: {e}")
+            # フォールバック値
+            return {
+                'POSTS_PER_ACCOUNT': 1,
+                'START_HOUR': 10,
+                'END_HOUR': 22,
+                'MIN_INTERVAL_MINUTES': 10,
+                'SCHEDULE_FILE': 'logs/schedule.txt',
+                'EXECUTED_FILE': 'logs/executed.txt'
+            }
+    
+    # 設定値を取得
+    settings = get_schedule_settings()
+    POSTS_PER_ACCOUNT = settings['POSTS_PER_ACCOUNT']
+    START_HOUR = settings['START_HOUR']
+    END_HOUR = settings['END_HOUR']
+    MIN_INTERVAL_MINUTES = settings['MIN_INTERVAL_MINUTES']
+    SCHEDULE_FILE = settings['SCHEDULE_FILE']
+    EXECUTED_FILE = settings['EXECUTED_FILE']
     
     def get_accounts():
         """config.ymlから有効なアカウントIDリストを取得"""
@@ -34,6 +63,14 @@ try:
     print("config.ymlからアカウント情報を読み取ります")
 except ImportError:
     print("⚠️ config_loaderのインポートに失敗しました")
+    # フォールバック値
+    POSTS_PER_ACCOUNT = 1
+    START_HOUR = 10
+    END_HOUR = 22
+    MIN_INTERVAL_MINUTES = 10
+    SCHEDULE_FILE = 'logs/schedule.txt'
+    EXECUTED_FILE = 'logs/executed.txt'
+    
     def get_accounts():
         return []
 

@@ -353,7 +353,6 @@ if __name__ == "__main__":
         sheet_n = gs_source.get("sheet_name")
         worksheet_n = gs_source.get("worksheet_name")
         if sheet_n and worksheet_n:
-            print(f"Attempting to load from GSheet: {sheet_n} - {worksheet_n} using key: {gkey_file}")
             sheet_cfg = load_config_from_sheet(sheet_name=sheet_n, worksheet_name=worksheet_n, key_file_path=gkey_file)
     
     if sheet_cfg:

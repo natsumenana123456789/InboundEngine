@@ -18,12 +18,39 @@ twitter_api:
 auto_post_bot:
   slack_webhook_url: "https://hooks.slack.com/services/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"
   sheet_name: "投稿ストック"
-  columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
+  columns: ["ID", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
+  
+  # 投稿制御設定
+  posting_settings:
+    posts_per_account: 1                    # 1アカウントあたりの投稿回数
+    max_posts_per_account: 1                # 処理時の最大投稿数
+    max_post_count: 3                       # 記事あたりの最大投稿回数
+    min_interval_hours: 24                  # 最小投稿間隔（時間）
+    post_interval_seconds: 10               # 投稿間の待機時間（秒）
+  
+  # スケジュール設定
+  schedule_settings:
+    start_hour: 10                          # 営業開始時間
+    end_hour: 22                            # 営業終了時間
+    min_interval_minutes: 10                # 最小投稿間隔（分）
+    schedule_file: "logs/schedule.txt"      # スケジュールファイルパス
+    executed_file: "logs/executed.txt"      # 実行済みファイルパス
+  
+  # メディア処理設定
+  media_settings:
+    download_timeout: 60                    # ダウンロードタイムアウト（秒）
+    error_message_max_length: 100           # エラーメッセージ最大文字数
+    temp_file_cleanup: true                 # 一時ファイル自動削除
+  
+  # テキスト処理設定
+  text_settings:
+    thread_padding: 10                      # ツリー投稿時の文字数余裕
+    content_preview_length: 50              # プレビュー表示文字数
+  
   twitter_accounts:
     - account_id: "jadiAngkat"
       email: "jptmarketing.takahashi@gmail.com"
       username: "jadiAngkat"
-      password: "Wm3hMCUT"  # 参考用（現在はAPI認証のみ使用）
       consumer_key: "jYJ4jjagTLCB6paNYyd9WjRKx"
       consumer_secret: "tBb7kc4frNUbKzUW1fyZwKs7hPRyaqcP4YpmaT7vFSH2b7Giww"
       access_token: "1669425142764810240-Tsvn4ivYdo9NfP9d2EEPxEiVo2MU81"
@@ -34,7 +61,6 @@ auto_post_bot:
     - account_id: "hinataHHHHHH"
       email: "takahashi.jumpei.nari@gmail.com"
       username: "hinataHHHHHH"
-      password: "Wm3hMCUT"  # 参考用（現在はAPI認証のみ使用）
       consumer_key: "jYJ4jjagTLCB6paNYyd9WjRKx"
       consumer_secret: "tBb7kc4frNUbKzUW1fyZwKs7hPRyaqcP4YpmaT7vFSH2b7Giww"
       access_token: "1669425142764810240-Tsvn4ivYdo9NfP9d2EEPxEiVo2MU81"
@@ -54,6 +80,7 @@ analyze_bot:
 # ========================================
 # 削除した不要な設定項目：
 # ========================================
+# - password: API認証のみ使用のため不要
 # - default_user_agents: 現在使用されていない
 # - notion: Notion連携は現在未使用
 # - gemini_api: OCR機能は現在未使用

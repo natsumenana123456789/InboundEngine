@@ -5,24 +5,29 @@
 PyYAML
 
 # HTTP通信
-requests
+requests==2.31.0
 
 # X API 連携
-tweepy
+tweepy==4.14.0
 
 # Google Sheets 連携
-google-api-python-client
-google-auth
-google-auth-httplib2
-google-auth-oauthlib
-gspread
+gspread==5.12.0
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.1.1
 oauth2client
 
 # 画像・動画処理
-Pillow
+Pillow==10.1.0
 
 # 日付処理
-python-dateutil
+python-dateutil==2.8.2
+
+# 設定管理
+python-dotenv==1.0.0
+
+# ログ管理
+structlog==23.2.0
 
 # ====================================
 # 削除した不要な依存関係：
