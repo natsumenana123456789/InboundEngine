@@ -18,7 +18,7 @@ twitter_api:
 auto_post_bot:
   slack_webhook_url: "https://hooks.slack.com/services/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"
   sheet_name: "投稿ストック"
-  columns: ["ID", "投稿アカウント", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
+  columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
   twitter_accounts:
     - account_id: "jadiAngkat"
       email: "jptmarketing.takahashi@gmail.com"

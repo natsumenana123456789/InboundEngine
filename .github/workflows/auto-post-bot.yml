@@ -97,7 +97,7 @@ jobs:
         auto_post_bot:
           slack_webhook_url: "${{ secrets.SLACK_WEBHOOK_URL }}"
           sheet_name: "投稿ストック"
-          columns: ["ID", "投稿アカウント", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
+          columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
           twitter_accounts:
             - account_id: "jadiAngkat"
               username: "jadiAngkat"
@@ -160,7 +160,7 @@ jobs:
         auto_post_bot:
           slack_webhook_url: "${{ secrets.SLACK_WEBHOOK_URL }}"
           sheet_name: "投稿ストック"
-          columns: ["ID", "投稿アカウント", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
+          columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
           twitter_accounts:
             - account_id: "jadiAngkat"
               username: "jadiAngkat"
@@ -226,7 +226,7 @@ jobs:
         auto_post_bot:
           slack_webhook_url: "${{ secrets.SLACK_WEBHOOK_URL }}"
           sheet_name: "投稿ストック"
-          columns: ["ID", "投稿アカウント", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
+          columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿済み回数"]
           twitter_accounts:
             - account_id: "jadiAngkat"
               username: "jadiAngkat"
