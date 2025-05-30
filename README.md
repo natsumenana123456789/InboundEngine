@@ -530,15 +530,41 @@ git push -u origin main
 
 **🔑 必須Secrets:**
 ```
+# 共通設定
 GOOGLE_SHEETS_KEY: (gspread-key.json の内容をまるごと)
 SLACK_WEBHOOK_URL: (Slack Webhook URL)
-TWITTER_BEARER_TOKEN: (X API Bearer Token)
-TWITTER_CONSUMER_KEY: (X API Consumer Key)
-TWITTER_CONSUMER_SECRET: (X API Consumer Secret)
-TWITTER_ACCESS_TOKEN: (X API Access Token)
-TWITTER_ACCESS_TOKEN_SECRET: (X API Access Token Secret)
+TWITTER_BEARER_TOKEN: (X API Bearer Token - 共通)
+
+# jadiAngkat アカウント用 (Account1)
+ACCOUNT1_CONSUMER_KEY: (jadiAngkat用 Consumer Key)
+ACCOUNT1_CONSUMER_SECRET: (jadiAngkat用 Consumer Secret)
+ACCOUNT1_ACCESS_TOKEN: (jadiAngkat用 Access Token)
+ACCOUNT1_ACCESS_TOKEN_SECRET: (jadiAngkat用 Access Token Secret)
 ACCOUNT1_EMAIL: (jadiAngkatのメールアドレス)
+
+# hinataHHHHHH アカウント用 (Account2)
+ACCOUNT2_CONSUMER_KEY: (hinataHHHHHH用 Consumer Key)
+ACCOUNT2_CONSUMER_SECRET: (hinataHHHHHH用 Consumer Secret)
+ACCOUNT2_ACCESS_TOKEN: (hinataHHHHHH用 Access Token)
+ACCOUNT2_ACCESS_TOKEN_SECRET: (hinataHHHHHH用 Access Token Secret)
 ACCOUNT2_EMAIL: (hinataHHHHHHのメールアドレス)
+```
+
+**💡 Secrets設定の簡潔リスト:**
+```
+GOOGLE_SHEETS_KEY
+SLACK_WEBHOOK_URL
+TWITTER_BEARER_TOKEN
+ACCOUNT1_CONSUMER_KEY
+ACCOUNT1_CONSUMER_SECRET
+ACCOUNT1_ACCESS_TOKEN
+ACCOUNT1_ACCESS_TOKEN_SECRET
+ACCOUNT1_EMAIL
+ACCOUNT2_CONSUMER_KEY
+ACCOUNT2_CONSUMER_SECRET
+ACCOUNT2_ACCESS_TOKEN
+ACCOUNT2_ACCESS_TOKEN_SECRET
+ACCOUNT2_EMAIL
 ```
 
 #### 3. 自動実行スケジュール 📅
@@ -586,76 +612,23 @@ Branch: main
 ⏰ 生成時刻: 2025-05-30 23:15:30
 ```
 
-### セットアップ手順
+### 🔧 その他のクラウドオプション
 
-#### 1. リポジトリ準備
+#### **Railway** ($5/月の無料クレジット)
 ```bash
-# プライベートリポジトリ作成（機密情報があるため）
-gh repo create InboundEngine-Bot --private
-git remote add origin https://github.com/yourusername/InboundEngine-Bot.git
-git push -u origin main
+npm install -g @railway/cli
+railway login
+railway init
+railway up
 ```
 
-#### 2. GitHub Secrets 設定 ⚙️
-`Settings > Secrets and variables > Actions` で以下を設定:
+#### **AWS EC2 t2.micro** (1年間無料)
+- より多くの設定が必要
+- Linux サーバー管理スキル必要
 
-**🔑 必須Secrets:**
-```
-GOOGLE_SHEETS_KEY: (gspread-key.json の内容をまるごと)
-SLACK_WEBHOOK_URL: (Slack Webhook URL)
-TWITTER_BEARER_TOKEN: (X API Bearer Token)
-TWITTER_CONSUMER_KEY: (X API Consumer Key)
-TWITTER_CONSUMER_SECRET: (X API Consumer Secret)
-TWITTER_ACCESS_TOKEN: (X API Access Token)
-TWITTER_ACCESS_TOKEN_SECRET: (X API Access Token Secret)
-ACCOUNT1_EMAIL: (jadiAngkatのメールアドレス)
-ACCOUNT2_EMAIL: (hinataHHHHHHのメールアドレス)
-```
-
-#### 3. 自動実行スケジュール 📅
-設定済みの実行スケジュール:
-- **毎朝8時**: スケジュール生成 + Slack通知
-- **毎日10時、14時、18時、21時**: 自動投稿実行
-- **Git push時**: 「スクリプトが更新されました。」Slack通知
-
-#### 4. 手動実行オプション 🔧
-GitHub Actions画面で「Run workflow」ボタンから:
-- `post`: 投稿実行
-- `schedule`: 通常スケジュール生成
-- `schedule-now`: 現在時刻以降でスケジュール生成
-
-#### 5. Slack通知の詳細 📱
-
-**📢 Git Push通知:**
-```
-🔄 スクリプトが更新されました。
-Repository: user/InboundEngine-Bot
-Commit: feat: 新機能追加
-Author: user
-Branch: main
-```
-
-**📅 スケジュール通知（改善版）:**
-```
-📅 自動投稿スケジュール
-
-• jadiAngkat: 05/30 17:33 (約1時間54分後)
-• hinataHHHHHH: 05/30 21:27 (約5時間48分後)
-
-📊 合計2件 | 2アカウント
-⏰ 生成時刻: 2025-05-30 15:38:15
-```
-
-**🌙 夜間実行時の通知:**
-```
-🌙 夜間スケジュール生成完了 （営業時間外のため翌日に設定）
-
-• jadiAngkat: 05/31 11:15 (約12時間37分後)
-• hinataHHHHHH: 05/31 16:42 (約18時間4分後)
-
-📊 合計2件 | 2アカウント | 本日0件・翌日2件
-⏰ 生成時刻: 2025-05-30 23:15:30
-```
+#### **Google Cloud Run** (月200万リクエスト無料)
+- Dockerfile が必要
+- GCP の設定が複雑
 
 ### ✅ GitHub Actions の利点
 
