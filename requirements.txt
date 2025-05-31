@@ -44,4 +44,5 @@ structlog==23.2.0
 # snscrape - キュレーション機能は現在無効化
 
 pytest==7.4.4
-responses==0.24.1 
+responses==0.24.1
+freezegun==1.4.0 
