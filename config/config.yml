@@ -7,7 +7,7 @@ common:
 
 # 自動投稿Bot設定
 auto_post_bot:
-  slack_webhook_url: "https://hooks.slack.com/services/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"  # Slack通知用Webhook URL
+  slack_webhook_url: "https://hooks.slack.com/services/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"  # Slack通知用Webhook URL
   sheet_name: "投稿ストック"
   columns: ["ID", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
   
