@@ -4,6 +4,7 @@ common:
   log_level: "INFO"
   file_paths:
     google_key_file: "gspread-key.json"
+    twitter_credentials_file: "twitter_api_credentials.json"  # Twitter API認証情報ファイル
 
 # 自動投稿Bot設定
 auto_post_bot:
@@ -41,18 +42,10 @@ auto_post_bot:
   
   twitter_accounts:
     - account_id: "ZaikerLong"
-      consumer_key: ${TWITTER_ZAIKERLONG_CONSUMER_KEY}
-      consumer_secret: ${TWITTER_ZAIKERLONG_CONSUMER_SECRET}
-      access_token: ${TWITTER_ZAIKERLONG_ACCESS_TOKEN}
-      access_token_secret: ${TWITTER_ZAIKERLONG_ACCESS_TOKEN_SECRET}
       google_sheets_source:
         enabled: true
         worksheet_name: "都内メンエス"
     - account_id: "hinataMaking"
-      consumer_key: ${TWITTER_HINATAM_CONSUMER_KEY}
-      consumer_secret: ${TWITTER_HINATAM_CONSUMER_SECRET}
-      access_token: ${TWITTER_HINATAM_ACCESS_TOKEN}
-      access_token_secret: ${TWITTER_HINATAM_ACCESS_TOKEN_SECRET}
       google_sheets_source:
         enabled: true
         worksheet_name: "都内セクキャバ"
