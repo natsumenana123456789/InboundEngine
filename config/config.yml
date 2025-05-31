@@ -17,8 +17,8 @@ auto_post_bot:
     worksheet_name: "都内メンエス"
 
   posting_settings:
-    posts_per_account: 1
-    max_posts_per_account: 1
+    posts_per_account: 5
+    max_posts_per_account: 5
     max_post_count: 3
     min_interval_hours: 24
     post_interval_seconds: 10
