@@ -187,4 +187,5 @@ chromedriver_mac64.zip
 # Configuration files (sensitive)
 config/gcp_service_account_key.json
 config/config.yml # コミットするかどうかユーザー判断 
-temp_env_values.txt 
+temp_env_values.txt config/gspread-key.json
+config/config.yml

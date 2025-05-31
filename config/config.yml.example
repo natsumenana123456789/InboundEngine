@@ -7,7 +7,7 @@ common:
 
 # 自動投稿Bot設定
 auto_post_bot:
-  slack_webhook_url: "https://hooks.slack.com/services/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"  # 実際のURLに置き換えてください
+  slack_webhook_url: ${SLACK_WEBHOOK_URL}  # 環境変数から読み込み
   sheet_name: "投稿ストック"
   columns: ["ID", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
   
@@ -41,18 +41,18 @@ auto_post_bot:
   
   twitter_accounts:
     - account_id: "ZaikerLong"
-      consumer_key: "xAPh3lRibyp8qEqhXSlCPi9ls"
-      consumer_secret: "EtWUYJRfXw37ZQyVP5LwQog13xi2UV3FYRvSWmYx4OF5zhg22j"
-      access_token: "1332761771279601672-QZXhMnpVtjEWecoLMM40QmPCENzY0x"
-      access_token_secret: "ZySI4nVscSfMjdGGpcOyOYbvRGePF13OqvVVsJ9Bss3xX"
+      consumer_key: ${TWITTER_ZAIKERLONG_CONSUMER_KEY}
+      consumer_secret: ${TWITTER_ZAIKERLONG_CONSUMER_SECRET}
+      access_token: ${TWITTER_ZAIKERLONG_ACCESS_TOKEN}
+      access_token_secret: ${TWITTER_ZAIKERLONG_ACCESS_TOKEN_SECRET}
       google_sheets_source:
         enabled: true
         worksheet_name: "都内メンエス"
     - account_id: "hinataMaking"
-      consumer_key: "dAWrjWZ9B3JPLitFAppAqYYle"
-      consumer_secret: "hYVBLgMLvi5FbGn8if6587M7yNVLN7uxG6U1yqezlaiN5s853S"
-      access_token: "1790120446198689792-cTjrCAE1viby3LhpKl1wvnqj6JIM4W"
-      access_token_secret: "blDTtMDxtTo1WgcR4AEtZ3cs8zq8aa0BXWRlv1luYCdfv"
+      consumer_key: ${TWITTER_HINATAM_CONSUMER_KEY}
+      consumer_secret: ${TWITTER_HINATAM_CONSUMER_SECRET}
+      access_token: ${TWITTER_HINATAM_ACCESS_TOKEN}
+      access_token_secret: ${TWITTER_HINATAM_ACCESS_TOKEN_SECRET}
       google_sheets_source:
         enabled: true
         worksheet_name: "都内セクキャバ"

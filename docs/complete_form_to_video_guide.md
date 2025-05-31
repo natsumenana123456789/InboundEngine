@@ -98,12 +98,7 @@
      ```
    - **「選択」** をクリック
 
-   **📝 見つからない場合の手順：**
-   1. **回答** タブで **「スプレッドシートを作成」** をクリック
-   2. 新しいスプレッドシートが作成される
-   3. 後でそのスプレッドシートからデータを既存シートにコピー
-   
-   **🔄 または、スプレッドシート側から連携：**
+   **🚨 または、スプレッドシート側から連携：**
    1. 対象スプレッドシートを開く
    2. **挿入** → **フォーム** → **新しいフォーム**
    3. 作成されたフォームを編集して設定
@@ -137,27 +132,6 @@
    E列: 更に投稿を追加しますか
    ```
 
-   **⚠️ 重要：B列削除前の対応**
-   - 既存の「質問投稿」列（B列）を削除する前に、まずこのガイドのApps Scriptを設定してください
-   - 削除後は列が1つずつ前にズレるため、既存の自動投稿システムに影響しません
-   - `config_loader.py`はヘッダー名で列を識別するため、列位置が変わっても問題ありません
-
-   **🚨 config.yml の列設定を更新する必要があります**
-   
-   `config/config.yml` の `columns` 設定から「投稿タイプ」を削除してください：
-   
-   **修正前：**
-   ```yaml
-   columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
-   ```
-   
-   **修正後：**
-   ```yaml
-   columns: ["ID", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
-   ```
-   
-   この設定は現在使用されていませんが、将来の機能拡張時に影響する可能性があります。
-
 ### 2-2. Google Apps Scriptの設定
 1. スプレッドシートで **拡張機能** → **Apps Script**
 2. 新しいプロジェクトを作成
@@ -180,25 +154,19 @@ function onFormSubmit(e) {
     console.log('タイムスタンプ:', timestamp);
     console.log('選択アカウント:', account);
     
-    // アカウントに対応するシート名を決定
-    let sheetName;
-    if (account.includes('都内メンエス')) {
-      sheetName = '都内メンエス';
-    } else if (account.includes('都内セクキャバ')) {
-      sheetName = '都内セクキャバ';
-    } else {
-      console.error('不明なアカウント:', account);
-      return;
-    }
+    // 「書き込むシート」の値をそのままシート名として使用（動的対応）
+    const sheetName = account.trim();
     
     console.log('対象シート:', sheetName);
     
     // スプレッドシートとワークシートの取得
     const spreadsheet = SpreadsheetApp.openById('1lgCn5iAiFT9PSr3vA3Tp1SePe0g3B9Xe1ppsr8bn2FA');
-    const sheet = spreadsheet.getSheetByName(sheetName);
+    
+    // シートの存在確認（動的シート検出）
+    const sheet = getOrCreateSheet(spreadsheet, sheetName);
     
     if (!sheet) {
-      console.error('シートが見つかりません:', sheetName);
+      console.error('シートの取得に失敗しました:', sheetName);
       return;
     }
     
@@ -320,16 +288,122 @@ function convertImageToVideo(fileId) {
       return fileId; // 元のファイルIDを返す
     }
     
-    // ここで実際の動画変換処理を実装
-    // 現在は元のファイルIDを返す
-    console.log('動画変換処理（未実装）');
+    // GitHub Actions経由で動画変換を実行
+    const convertedFileId = triggerVideoConversionWorkflow(fileId);
     
-    return fileId;
+    return convertedFileId || fileId;
     
   } catch (error) {
     console.error('動画変換エラー:', error);
     return fileId;
   }
+}
+
+// GitHub Actions ワークフローをトリガーする関数
+function triggerVideoConversionWorkflow(fileId) {
+  try {
+    // GitHub API設定
+    const GITHUB_TOKEN = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
+    const GITHUB_REPO = 'YOUR_USERNAME/InboundEngine'; // リポジトリ名
+    const WORKFLOW_ID = 'video-conversion.yml'; // ワークフローファイル名
+    
+    if (!GITHUB_TOKEN) {
+      console.error('GitHub Token が設定されていません');
+      return null;
+    }
+    
+    // ワークフロー実行API呼び出し
+    const url = `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${WORKFLOW_ID}/dispatches`;
+    
+    const payload = {
+      ref: 'main', // ブランチ名
+      inputs: {
+        file_id: fileId,
+        action: 'convert_image_to_video',
+        duration: '1',
+        timestamp: new Date().toISOString()
+      }
+    };
+    
+    console.log('GitHub Actions ワークフローを開始:', fileId);
+    const response = UrlFetchApp.fetch(url, options);
+    
+    if (response.getResponseCode() === 204) {
+      console.log('ワークフロー開始成功');
+      
+      // 変換完了を待機（非同期処理）
+      return waitForConversionCompletion(fileId);
+      
+    } else {
+      console.error('ワークフロー開始失敗:', response.getContentText());
+      return null;
+    }
+    
+  } catch (error) {
+    console.error('GitHub Actions連携エラー:', error);
+    return null;
+  }
+}
+
+// 変換完了待機関数
+function waitForConversionCompletion(originalFileId) {
+  try {
+    const maxWaitTime = 300000; // 5分間
+    const checkInterval = 10000; // 10秒間隔
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      // Google Driveで変換済みファイルをチェック
+      const convertedFileId = checkForConvertedFile(originalFileId);
+      
+      if (convertedFileId) {
+        console.log('動画変換完了:', convertedFileId);
+        return convertedFileId;
+      }
+      
+      // 10秒待機
+      Utilities.sleep(checkInterval);
+    }
+    
+    console.log('動画変換タイムアウト:', originalFileId);
+    return null;
+    
+  } catch (error) {
+    console.error('変換完了待機エラー:', error);
+    return null;
+  }
+}
+
+// 変換済みファイルの確認
+function checkForConvertedFile(originalFileId) {
+  try {
+    // 命名規則: original_fileId + "_converted.mp4"
+    const convertedFileName = `${originalFileId}_converted.mp4`;
+    
+    // Google Driveで検索
+    const files = DriveApp.getFilesByName(convertedFileName);
+    
+    if (files.hasNext()) {
+      const convertedFile = files.next();
+      return convertedFile.getId();
+    }
+    
+    return null;
+    
+  } catch (error) {
+    console.error('変換済みファイル確認エラー:', error);
+    return null;
+  }
+}
+
+// 設定関数：GitHub Token を設定
+function setupGitHubIntegration() {
+  // Apps Script の プロパティ で設定
+  const GITHUB_TOKEN = 'YOUR_GITHUB_PERSONAL_ACCESS_TOKEN'; // GitHub で生成
+  
+  PropertiesService.getScriptProperties().setProperty('GITHUB_TOKEN', GITHUB_TOKEN);
+  
+  console.log('GitHub Token 設定完了');
 }
 
 // トリガーのセットアップ
@@ -365,21 +439,198 @@ function testFormSubmit() {
   
   onFormSubmit(testData);
 }
-```
 
-### 2-3. トリガーの設定
-1. Apps Scriptで **トリガー** をクリック
-2. **+ トリガーを追加**
-3. 設定:
-   - 実行する関数: `onFormSubmit`
-   - イベントのソース: `フォームから`
-   - イベントの種類: `フォーム送信時`
+// 動的シート取得・作成機能
+function getOrCreateSheet(spreadsheet, sheetName) {
+  try {
+    // 指定されたシートを取得を試行
+    let sheet = spreadsheet.getSheetByName(sheetName);
+    
+    if (sheet) {
+      console.log('シートを発見:', sheetName);
+      return sheet;
+    }
+    
+    // シートが見つからない場合の処理
+    console.log('指定シートが見つかりません:', sheetName);
+    console.log('利用可能なシート一覧:', spreadsheet.getSheets().map(s => s.getName()));
+    
+    // 部分一致でシートを検索（フォールバック機能）
+    const availableSheets = spreadsheet.getSheets();
+    for (let availableSheet of availableSheets) {
+      const availableName = availableSheet.getName();
+      if (availableName.includes(sheetName) || sheetName.includes(availableName)) {
+        console.log('部分一致でシートを発見:', availableName);
+        return availableSheet;
+      }
+    }
+    
+    // ここで新しいシートを自動作成するかはプロジェクトポリシーに依存
+    // 現在は作成しないが、必要に応じて以下をコメントアウト
+    /*
+    console.log('新しいシートを作成:', sheetName);
+    sheet = spreadsheet.insertSheet(sheetName);
+    
+    // 新規シートのヘッダーを設定
+    const headers = ['行番号', '投稿内容', '文字数', 'ファイルID', '投稿可能', 'アカウント数', '番号'];
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    
+    return sheet;
+    */
+    
+    return null;
+    
+  } catch (error) {
+    console.error('シート取得エラー:', error);
+    return null;
+  }
+}
+
+// 利用可能なシート一覧を取得する関数
+function getAvailableSheets() {
+  const spreadsheet = SpreadsheetApp.openById('1lgCn5iAiFT9PSr3vA3Tp1SePe0g3B9Xe1ppsr8bn2FA');
+  const sheets = spreadsheet.getSheets().map(sheet => sheet.getName());
+  console.log('利用可能なシート一覧:', sheets);
+  return sheets;
+}
 
 ---
 
-## 🛠️ STEP 2.5: GAS Git管理（clasp）の設定
+## 🛠️ STEP 2.5: GitHub Actions 動画変換連携
 
-### 2.5-1. 事前準備
+### 2.5-1. 概要
+GASからGitHub Actionsサーバーを呼び出して画像→動画変換を実行する仕組みです。
+
+### 2.5-2. GitHub Actions ワークフローファイル
+
+プロジェクトルートに `.github/workflows/video-conversion.yml` を作成:
+
+```yaml
+name: 画像→動画変換処理
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_id:
+        description: 'Google Drive ファイルID'
+        required: true
+        type: string
+      action:
+        description: '実行アクション'
+        required: true
+        default: 'convert_image_to_video'
+        type: string
+      duration:
+        description: '動画の長さ（秒）'
+        required: false
+        default: '1'
+        type: string
+
+jobs:
+  convert-image-to-video:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        
+    - name: Setup Google Drive credentials
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      run: |
+        echo "$GOOGLE_CREDENTIALS" > credentials.json
+        
+    - name: Download image from Google Drive
+      env:
+        FILE_ID: ${{ inputs.file_id }}
+      run: |
+        python bots/video_converter/download_from_drive.py --file-id "$FILE_ID"
+        
+    - name: Convert image to video
+      env:
+        FILE_ID: ${{ inputs.file_id }}
+        DURATION: ${{ inputs.duration }}
+      run: |
+        python bots/video_converter/convert_to_video.py \
+          --input "temp_downloads/${FILE_ID}" \
+          --output "temp_videos/${FILE_ID}_converted.mp4" \
+          --duration "$DURATION"
+          
+    - name: Upload video to Google Drive
+      env:
+        FILE_ID: ${{ inputs.file_id }}
+      run: |
+        python bots/video_converter/upload_to_drive.py \
+          --file "temp_videos/${FILE_ID}_converted.mp4" \
+          --original-id "$FILE_ID"
+          
+    - name: Cleanup temporary files
+      run: |
+        rm -rf temp_downloads/ temp_videos/ credentials.json
+```
+
+### 2.5-3. 必要なセットアップ作業
+
+#### 1. GitHub Personal Access Token 作成
+1. GitHub → Settings → Developer settings → Personal access tokens
+2. **Generate new token (classic)**
+3. スコープ: `repo`, `workflow`
+4. 生成されたトークンをコピー
+
+#### 2. Google Service Account 作成
+1. [Google Cloud Console](https://console.cloud.google.com/)
+2. プロジェクト作成またはサービスアカウント作成
+3. Google Drive API を有効化
+4. サービスアカウントキー（JSON）をダウンロード
+
+#### 3. GitHub Secrets 設定
+リポジトリの Settings → Secrets and variables → Actions:
+- `GOOGLE_CREDENTIALS`: サービスアカウントJSONの内容
+
+#### 4. Apps Script でトークン設定
+```javascript
+// 一度だけ実行
+function setupGitHubIntegration() {
+  const GITHUB_TOKEN = 'ghp_your_token_here'; // 生成したトークン
+  PropertiesService.getScriptProperties().setProperty('GITHUB_TOKEN', GITHUB_TOKEN);
+  console.log('GitHub Token 設定完了');
+}
+```
+
+### 2.5-4. 動作フロー
+
+```
+フォーム送信
+    ↓
+GAS: 画像ファイルID取得
+    ↓
+GAS: GitHub Actions API呼び出し
+    ↓
+GitHub Actions: 画像ダウンロード
+    ↓
+GitHub Actions: 動画変換（MoviePy）
+    ↓
+GitHub Actions: 動画アップロード
+    ↓
+GAS: 変換完了待機
+    ↓
+スプレッドシートに変換済み動画ID記録
+```
+
+---
+
+## 🛠️ STEP 2.6: GAS Git管理（clasp）の設定
+
+### 2.6-1. 事前準備
 
 #### Node.js のインストール確認
 ```bash
@@ -400,7 +651,7 @@ npm install -g @google/clasp
 clasp --version
 ```
 
-### 2.5-2. clasp の初期設定
+### 2.6-2. clasp の初期設定
 
 #### Google Apps Script API を有効化
 1. [Google Apps Script API](https://script.google.com/home/usersettings) にアクセス
@@ -413,7 +664,7 @@ clasp login
 ```
 ブラウザが開くので、Googleアカウントでログインして認証を完了
 
-### 2.5-3. 既存GASプロジェクトをローカルに取得
+### 2.6-3. 既存GASプロジェクトをローカルに取得
 
 #### プロジェクトIDの確認
 1. Apps Script エディタを開く
@@ -438,7 +689,7 @@ echo "node_modules/
 clasp clone YOUR_SCRIPT_ID_HERE
 ```
 
-### 2.5-4. ローカル開発環境の構築
+### 2.6-4. ローカル開発環境の構築
 
 #### TypeScript 設定（推奨）
 ```bash
@@ -499,7 +750,7 @@ cat > src/main.ts << 'EOL'
 EOL
 ```
 
-### 2.5-5. Git でのバージョン管理
+### 2.6-5. Git でのバージョン管理
 
 #### 初回コミット
 ```bash
@@ -555,7 +806,7 @@ git checkout -b feature/image-processing
 git checkout -b feature/video-conversion
 ```
 
-### 2.5-6. 開発ワークフロー
+### 2.6-6. 開発ワークフロー
 
 #### ローカル開発の流れ
 ```bash
@@ -599,12 +850,9 @@ clasp deploy --description "$deploy_desc"
 echo "✅ デプロイ完了！"
 clasp open
 EOL
-
-# 実行権限を付与
-chmod +x deploy.sh
 ```
 
-### 2.5-7. GitHub 連携（オプション）
+### 2.6-7. GitHub 連携（オプション）
 
 #### GitHub リポジトリ作成
 ```bash
@@ -658,7 +906,7 @@ jobs:
 EOL
 ```
 
-### 2.5-8. 本番運用のポイント
+### 2.6-8. 本番運用のポイント
 
 #### 環境分離
 ```bash
@@ -697,7 +945,7 @@ clasp logs --watch
 clasp logs --since "2024-01-01" --until "2024-01-02"
 ```
 
-### 2.5-9. チーム開発（オプション）
+### 2.6-9. チーム開発（オプション）
 
 #### 共有設定
 ```bash

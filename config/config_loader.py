@@ -60,7 +60,6 @@ _env_loaded = False # .env読み込み済みフラグ (load_dotenv()がグロー
 
 def _load_config_from_yaml_once():
     global _config_cache
-    _config_cache = None # ★★★ 強制的にキャッシュをクリアして再読み込み ★★★
     if _config_cache is not None:
         return _config_cache
     
@@ -76,68 +75,8 @@ def _load_config_from_yaml_once():
         except Exception as e:
             raise RuntimeError(f"❌ 設定ファイル ({CONFIG_FILE_PATH}) の読み込み中にエラーが発生しました: {e}")
 
-    # config.yml の値を直接使用する (os.getenv を削除)
-    
-    # Notion
-    notion_config_original = config_from_yaml.get("notion", {}) # 元のnotionセクション全体を取得
-    config_from_yaml["notion"] = { # 新しい辞書として格納
-        "token": notion_config_original.get("token"),
-        "databases": notion_config_original.get("databases", {}) # databases セクションもコピー
-    }
-
-    # Gemini API
-    gemini_config = config_from_yaml.get("gemini_api", {})
-    config_from_yaml["gemini_api"] = {"api_key": gemini_config.get("api_key"), "service_account_file": gemini_config.get("service_account_file")}
-
-    # OpenAI API
-    openai_config = config_from_yaml.get("openai_api", {})
-    config_from_yaml["openai_api"] = {"api_key": openai_config.get("api_key")}
-
-    # Twitter API
-    twitter_api_config = config_from_yaml.get("twitter_api", {})
-    config_from_yaml["twitter_api"] = {
-        "bearer_token": twitter_api_config.get("bearer_token"),
-        "consumer_key": twitter_api_config.get("consumer_key"),
-        "consumer_secret": twitter_api_config.get("consumer_secret"),
-        "access_token": twitter_api_config.get("access_token"),
-        "access_token_secret": twitter_api_config.get("access_token_secret"),
-        "user_id_cache": twitter_api_config.get("user_id_cache", {})
-    }
-
-    # Curate Bot Twitter Account
-    curate_bot_config_original = config_from_yaml.get("curate_bot", {})
-    curate_bot_accounts_original = curate_bot_config_original.get("twitter_accounts", [])
-    # ここでは active_curation_account_id や twitter_accounts の email/username/password は
-    # config.yml に直接書かれている値をそのまま使うため、os.getenvによる上書きロジックは削除。
-    # 必要な値は config.yml に直接記述されている前提とする。
-    config_from_yaml["curate_bot"] = curate_bot_config_original # 元の値をそのまま使う
-
-    # Auto Post Bot Twitter Account
-    auto_post_bot_config_original = config_from_yaml.get("auto_post_bot", {})
-    auto_post_bot_accounts_original = auto_post_bot_config_original.get("twitter_accounts", [])
-    # 同様に、config.yml に直接書かれている値をそのまま使う
-    config_from_yaml["auto_post_bot"] = auto_post_bot_config_original # 元の値をそのまま使う
-
-    # Twitter Login Info (スクレイピング用などのグローバルなログイン情報)
-    twitter_login_info_config = config_from_yaml.get("twitter_login_info", {})
-    config_from_yaml["twitter_login_info"] = {
-        "username": twitter_login_info_config.get("username"),
-        "password": twitter_login_info_config.get("password")
-        # 必要であれば email も追加
-    }
-
-    # Google Drive
-    curate_bot_google_drive_config = config_from_yaml.get("curate_bot", {}).get("google_drive", {})
-    if "curate_bot" in config_from_yaml: # curate_bot セクションがある場合のみ
-        config_from_yaml["curate_bot"].setdefault("google_drive", {})["folder_id"] = curate_bot_google_drive_config.get("folder_id")
-
+    # config.yml の値を直接使用する
     _config_cache = config_from_yaml
-    # ★★★ デバッグ出力追加 ★★★
-    if _config_cache and "twitter_api" in _config_cache:
-        print(f"DEBUG: [_load_config_from_yaml_once] twitter_api section loaded: {_config_cache.get('twitter_api')}")
-    else:
-        print("DEBUG: [_load_config_from_yaml_once] twitter_api section NOT FOUND or config_cache is None.")
-    # ★★★ デバッグ出力ここまで ★★★
     return _config_cache
 
 def get_full_config():
@@ -247,28 +186,51 @@ def load_records_from_sheet(
     key_file_path: str
 ) -> list[dict]:
     """
-    指定されたGoogleスプレッドシートのワークシートから全てのレコードを
-    辞書のリストとして取得する。各辞書は1行を表し、キーはヘッダー行の値。
+    指定されたスプレッドシートからレコードを読み込む
+    
+    Args:
+        sheet_name (str): スプレッドシート名
+        worksheet_name (str): ワークシート名
+        key_file_path (str): サービスアカウントキーファイルのパス
+        
+    Returns:
+        list[dict]: レコードのリスト
     """
-    actual_key_file_path = os.path.join(CONFIG_DIR, key_file_path) if not os.path.isabs(key_file_path) else key_file_path
     try:
-        creds = ServiceAccountCredentials.from_json_keyfile_name(actual_key_file_path, GOOGLE_API_SCOPE)
-        client = gspread.authorize(creds)
-        sheet = client.open(sheet_name).worksheet(worksheet_name)
-        records = sheet.get_all_records() # ヘッダーをキーとした辞書のリストを取得
+        # キーファイルのパスを解決
+        actual_key_file_path = os.path.join(CONFIG_DIR, key_file_path) if not os.path.isabs(key_file_path) else key_file_path
+        
+        # Google Sheets APIの認証
+        scope = GOOGLE_API_SCOPE
+        credentials = ServiceAccountCredentials.from_json_keyfile_name(actual_key_file_path, scope)
+        client = gspread.authorize(credentials)
+        
+        # スプレッドシートを開く
+        sheet = client.open(sheet_name)
+        worksheet = sheet.worksheet(worksheet_name)
+        
+        # ヘッダー行を取得（1行目）
+        headers = worksheet.row_values(1)
+        
+        # 重複するヘッダーを修正
+        unique_headers = []
+        header_counts = {}
+        for header in headers:
+            if header in header_counts:
+                header_counts[header] += 1
+                unique_headers.append(f"{header}_{header_counts[header]}")
+            else:
+                header_counts[header] = 1
+                unique_headers.append(header)
+        
+        # レコードを取得
+        records = worksheet.get_all_records(expected_headers=unique_headers)
+        
         return records
-    except FileNotFoundError:
-        print(f"❌ Googleサービスアカウントのキーファイルが見つかりません: {actual_key_file_path}")
-        return [] # 空のリストを返す
-    except gspread.exceptions.SpreadsheetNotFound:
-        print(f"❌ スプレッドシートが見つかりません: {sheet_name}")
-        return []
-    except gspread.exceptions.WorksheetNotFound:
-        print(f"❌ ワークシートが見つかりません: {worksheet_name} (シート: {sheet_name})")
-        return []
+        
     except Exception as e:
         print(f"❌ スプレッドシートからのレコード読み込み中にエラー: {e}")
-        return []
+        raise
 
 def find_row_index_by_id(sheet_obj, id_column_header: str, target_id: str) -> Optional[int]:
     """
@@ -315,6 +277,63 @@ def update_cell_in_sheet(sheet_name: str, worksheet_name: str, key_file_path: st
         return False
     except Exception as e:
         print(f"❌ スプレッドシートのセル更新中にエラー: {e}")
+        return False
+
+def update_record_in_sheet(
+    sheet_name: str,
+    worksheet_name: str,
+    key_file_path: str,
+    target_id: str,
+    update_data: dict
+) -> bool:
+    """
+    指定されたスプレッドシートのレコードを更新する
+    
+    Args:
+        sheet_name (str): スプレッドシート名
+        worksheet_name (str): ワークシート名
+        key_file_path (str): サービスアカウントキーファイルのパス
+        target_id (str): 更新対象のID
+        update_data (dict): 更新するデータ（カラム名: 値）
+        
+    Returns:
+        bool: 更新成功かどうか
+    """
+    try:
+        # キーファイルのパスを解決
+        actual_key_file_path = os.path.join(CONFIG_DIR, key_file_path) if not os.path.isabs(key_file_path) else key_file_path
+        
+        # Google Sheets APIの認証
+        scope = GOOGLE_API_SCOPE
+        credentials = ServiceAccountCredentials.from_json_keyfile_name(actual_key_file_path, scope)
+        client = gspread.authorize(credentials)
+        
+        # スプレッドシートを開く
+        sheet = client.open(sheet_name)
+        worksheet = sheet.worksheet(worksheet_name)
+        
+        # ヘッダー行を取得（1行目）
+        headers = worksheet.row_values(1)
+        
+        # IDの列番号を取得
+        id_col = headers.index('ID') + 1  # 1-based index
+        
+        # IDで行を検索
+        cell = worksheet.find(str(target_id))
+        if not cell:
+            print(f"❌ ID {target_id} が見つかりません")
+            return False
+        
+        # 各カラムの値を更新
+        for column_name, value in update_data.items():
+            if column_name in headers:
+                col_index = headers.index(column_name) + 1  # 1-based index
+                worksheet.update_cell(cell.row, col_index, value)
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ スプレッドシートの更新中にエラー: {e}")
         return False
 
 # ============================
