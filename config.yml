@@ -1,6 +1,6 @@
 notifiers:
   discord:
-    webhook_url: "${DISCORD_WEBHOOK_URL}"
+    webhook_url: "https://discord.com/api/webhooks/1213346812345678901/abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmnopqrstuvwxyz"
     timeout: 30
     max_retries: 3
     rate_limit:
