@@ -90,46 +90,4 @@ def test_unsupported_media_type(twitter_client):
         
         assert result['success'] is False
         assert "Unsupported media type" in result['error']
-        mock_client.return_value.create_tweet.assert_not_called()
-
-def test_daily_post_limit(twitter_client):
-    """1日の投稿数が5件を超えないことを確認"""
-    with patch('tweepy.Client') as mock_client:
-        mock_client.return_value.create_tweet.return_value = {
-            'data': {'id': '123', 'text': 'Test tweet'}
-        }
-        twitter_client._client = mock_client.return_value
-        
-        # 5件の投稿を実行
-        for _ in range(5):
-            result = twitter_client.post_tweet("Test tweet")
-            assert result['success'] is True
-        
-        # 6件目の投稿
-        result = twitter_client.post_tweet("Test tweet")
-        assert result['success'] is False
-        assert "Daily post limit exceeded" in result['error']
-
-def test_account_post_limit(twitter_client):
-    """アカウントごとの投稿数が5件を超えないことを確認"""
-    with patch('tweepy.Client') as mock_client:
-        mock_client.return_value.create_tweet.return_value = {
-            'data': {'id': '123', 'text': 'Test tweet'}
-        }
-        twitter_client._client = mock_client.return_value
-        
-        # 特定のアカウントで5件の投稿を実行
-        for _ in range(5):
-            result = twitter_client.post_tweet(
-                "Test tweet",
-                account_id="test_account"
-            )
-            assert result['success'] is True
-        
-        # 同じアカウントで6件目の投稿
-        result = twitter_client.post_tweet(
-            "Test tweet",
-            account_id="test_account"
-        )
-        assert result['success'] is False
-        assert "Account post limit exceeded" in result['error'] 
+        mock_client.return_value.create_tweet.assert_not_called() 

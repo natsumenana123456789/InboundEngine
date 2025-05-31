@@ -18,8 +18,6 @@ class AuthenticationError(Exception):
 
 class TwitterClient:
     SUPPORTED_MEDIA_TYPES = ['.jpg', '.jpeg', '.png', '.gif', '.mp4']
-    MAX_DAILY_POSTS = 5
-    MAX_ACCOUNT_POSTS = 5
     RATE_LIMIT_WAIT_TIME = 900  # 15分
     MAX_AUTH_RETRIES = 3
 
@@ -36,9 +34,6 @@ class TwitterClient:
             access_token=access_token,
             access_token_secret=access_token_secret
         )
-        self._daily_post_count = 0
-        self._account_post_counts = {}
-        self._last_reset = datetime.now()
 
     def post_tweet(
         self,
@@ -48,19 +43,6 @@ class TwitterClient:
     ) -> Dict:
         """ツイートを投稿する"""
         try:
-            # 投稿制限のチェック
-            if account_id and not self._check_account_post_limits(account_id):
-                return {
-                    'success': False,
-                    'error': 'Account post limit exceeded'
-                }
-            
-            if not self._check_post_limits(account_id):
-                return {
-                    'success': False,
-                    'error': 'Daily post limit exceeded'
-                }
-
             # メディアのバリデーション
             if media_paths and not self._validate_media_types(media_paths):
                 return {
@@ -73,9 +55,6 @@ class TwitterClient:
             while retry_count <= self.MAX_AUTH_RETRIES:
                 try:
                     response = self._client.create_tweet(text=text)
-                    
-                    # 投稿カウントの更新
-                    self._update_post_counts(account_id)
                     
                     return {
                         'success': True,
@@ -100,27 +79,6 @@ class TwitterClient:
                 'success': False,
                 'error': str(e)
             }
-
-    def _check_post_limits(self, account_id: Optional[str]) -> bool:
-        """1日の投稿制限をチェック"""
-        now = datetime.now()
-        if now - self._last_reset > timedelta(days=1):
-            self._daily_post_count = 0
-            self._account_post_counts = {}
-            self._last_reset = now
-        
-        return self._daily_post_count < self.MAX_DAILY_POSTS
-
-    def _check_account_post_limits(self, account_id: str) -> bool:
-        """アカウントごとの投稿制限をチェック"""
-        return self._account_post_counts.get(account_id, 0) < self.MAX_ACCOUNT_POSTS
-
-    def _update_post_counts(self, account_id: Optional[str]) -> None:
-        """投稿カウントを更新"""
-        self._daily_post_count += 1
-        if account_id:
-            self._account_post_counts[account_id] = \
-                self._account_post_counts.get(account_id, 0) + 1
 
     def _validate_media_types(self, media_paths: List[str]) -> bool:
         """メディアタイプのバリデーション"""
