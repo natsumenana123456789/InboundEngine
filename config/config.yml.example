@@ -18,10 +18,10 @@ auto_post_bot:
     worksheet_name: "都内メンエス"
 
   posting_settings:
-    posts_per_account: 1
-    max_posts_per_account: 1
-    max_post_count: 3
-    min_interval_hours: 24
+    posts_per_account: 5  # 1日あたりの投稿数を5件に変更
+    max_posts_per_account: 5  # 最大投稿数も5件に変更
+    max_post_count: 3  # 各投稿の最大投稿回数（変更なし）
+    min_interval_hours: 2  # 投稿間隔を2時間に変更（1日を10時間で割った場合）
     post_interval_seconds: 10
   
   schedule_settings:
