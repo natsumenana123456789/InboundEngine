@@ -1,13 +1,17 @@
 import os
 import time
+import yaml
 from datetime import datetime
 from src.notifiers.discord_notifier import DiscordNotifier
 
 def main():
-    # 実際のWebhook URLを環境変数から取得
-    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    # config.ymlからWebhook URLを読み取る
+    with open("config.yml", "r") as f:
+        config = yaml.safe_load(f)
+        webhook_url = config["discord"]["webhook_url"]
+
     if not webhook_url:
-        print("Error: DISCORD_WEBHOOK_URL environment variable is not set")
+        print("Error: webhook_url is not set in config.yml")
         return
 
     notifier = DiscordNotifier(webhook_url=webhook_url)
