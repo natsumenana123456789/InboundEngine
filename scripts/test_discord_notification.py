@@ -8,11 +8,15 @@ def main():
     # config.ymlからWebhook URLを読み取る
     with open("config.yml", "r") as f:
         config = yaml.safe_load(f)
-        webhook_url = config["discord"]["webhook_url"]
+        webhook_url = config["notifiers"]["discord"]["webhook_url"]
 
-    if not webhook_url:
-        print("Error: webhook_url is not set in config.yml")
-        return
+    # 環境変数の展開
+    if webhook_url.startswith("${") and webhook_url.endswith("}"):
+        env_var = webhook_url[2:-1]
+        webhook_url = os.getenv(env_var)
+        if not webhook_url:
+            print(f"Error: Environment variable {env_var} is not set")
+            return
 
     notifier = DiscordNotifier(webhook_url=webhook_url)
 
