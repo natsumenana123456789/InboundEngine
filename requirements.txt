@@ -2,10 +2,17 @@
 # 実際に使用されているパッケージのみ
 
 # 設定ファイル読み込み
-PyYAML
+PyYAML==6.0.2
 
-# HTTP通信
+# HTTP通信（LINE Notify用にも使用）
 requests==2.31.0
+requests-oauthlib==1.3.1
+
+# メール送信
+secure-smtplib==0.1.1
+
+# Discord通知
+discord-webhook==1.3.0
 
 # X API 連携
 tweepy==4.14.0

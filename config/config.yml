@@ -7,7 +7,20 @@ common:
 
 # 自動投稿Bot設定
 auto_post_bot:
-  slack_webhook_url: "https://hooks.slack.com/services/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"  # Slack通知用Webhook URL
+  # Discord通知設定（メイン通知システム）
+  discord_notification:
+    enabled: true
+    webhook_url: "https://discord.com/api/webhooks/1378206571556765707/8_9FQToOU1qwc7xESSfJlizX9Xx-Ls1NxZQMF0Xht9wuTR9FozY9PihorKn0RromKqRp"
+
+  # 他の通知設定を無効化
+  line_notify:
+    enabled: false
+    access_token: ""
+
+  email_notification:
+    enabled: false
+
+  slack_webhook_url: ""
   sheet_name: "投稿ストック"
   columns: ["ID", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
   
@@ -17,11 +30,11 @@ auto_post_bot:
     worksheet_name: "都内メンエス"
 
   posting_settings:
-    posts_per_account: 5
-    max_posts_per_account: 5
-    max_post_count: 3
+    posts_per_account: 5  # 1日の投稿回数
+    max_posts_per_account: 5  # アカウントごとの最大投稿回数
+    max_post_count: 5  # 全体の最大投稿回数
     min_interval_hours: 24
-    post_interval_seconds: 10
+    post_interval_seconds: 300  # 投稿間隔を5分（300秒）に延長
   
   schedule_settings:
     start_hour: 10
