@@ -1,0 +1,8 @@
+notifiers:
+  discord:
+    webhook_url: "${DISCORD_WEBHOOK_URL}"
+    timeout: 30
+    max_retries: 3
+    rate_limit:
+      max_requests: 5
+      window_seconds: 60 
