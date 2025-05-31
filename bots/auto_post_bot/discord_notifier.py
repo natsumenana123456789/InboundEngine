@@ -57,7 +57,7 @@ class DiscordNotifier:
         """
         embed = DiscordEmbed(
             title="📅 投稿スケジュール",
-            color="5763719"  # 緑色
+            color=0x57F287  # 緑色
         )
         
         for account, times in schedule_data.items():
@@ -82,7 +82,7 @@ class DiscordNotifier:
         Returns:
             bool: 送信成功ならTrue、失敗ならFalse
         """
-        color = "5763719" if status == "成功" else "15158332"  # 緑 or 赤
+        color = 0x57F287 if status == "成功" else 0xED4245  # 緑 or 赤
         emoji = "✅" if status == "成功" else "❌"
         
         embed = DiscordEmbed(
@@ -115,7 +115,7 @@ def send_push_notification(webhook_url, repo, commit, author, branch):
         # 埋め込みメッセージを作成
         embed = DiscordEmbed(
             title="🔄 スクリプトが更新されました",
-            color="5763719"  # 緑色
+            color=0x57F287  # 緑色
         )
         
         # フィールドを追加
