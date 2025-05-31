@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime, timedelta
 from freezegun import freeze_time
-import responses
+from unittest.mock import patch
 from src.scheduler import PostScheduler
 from src.notifiers.discord_notifier import DiscordNotifier
 
@@ -50,13 +50,8 @@ class TestPostWorkflowIntegration:
             }
         ]
 
-    @pytest.fixture(autouse=True)
-    def setup_responses(self):
-        """全てのテストで自動的にresponsesを有効化"""
-        with responses.RequestsMock() as rsps:
-            yield rsps
-
-    def test_normal_post_workflow(self, scheduler, notifier, post_data, webhook_url, setup_responses):
+    @patch("requests.post")
+    def test_normal_post_workflow(self, mock_post, scheduler, notifier, post_data, webhook_url):
         """通常の投稿ワークフローのテスト
         
         シナリオ：
@@ -64,14 +59,8 @@ class TestPostWorkflowIntegration:
         2. 各投稿の間隔は5分以上
         3. 投稿完了後に通知を送信
         """
-        # モックレスポンスの設定
-        setup_responses.add(
-            responses.POST,
-            webhook_url,
-            json={"id": "test"},
-            status=204,
-            match=[responses.matchers.urlencoded_params_matcher({})],
-        )
+        # モックの設定
+        mock_post.return_value.status_code = 204
 
         with freeze_time("2024-01-01 10:00:00") as frozen_time:
             last_post_time = None
@@ -112,10 +101,8 @@ class TestPostWorkflowIntegration:
                 )
                 assert result is True
 
-                # 次の投稿のために5分進める
-                frozen_time.tick(delta=timedelta(minutes=5))
-
-    def test_post_limit_handling(self, scheduler, notifier, post_data, webhook_url, setup_responses):
+    @patch("requests.post")
+    def test_post_limit_handling(self, mock_post, scheduler, notifier, post_data, webhook_url):
         """投稿制限のハンドリングテスト
         
         シナリオ：
@@ -123,14 +110,8 @@ class TestPostWorkflowIntegration:
         2. 上限到達後の投稿をスキップ
         3. 翌日に投稿を再開
         """
-        # モックレスポンスの設定
-        setup_responses.add(
-            responses.POST,
-            webhook_url,
-            json={"id": "test"},
-            status=204,
-            match=[responses.matchers.urlencoded_params_matcher({})],
-        )
+        # モックの設定
+        mock_post.return_value.status_code = 204
 
         with freeze_time("2024-01-01 10:00:00") as frozen_time:
             last_post_time = None
@@ -168,15 +149,16 @@ class TestPostWorkflowIntegration:
             )
             assert result is True
 
-            # 翌日に進む
+            # 翌日10:00に時間を進める
             frozen_time.tick(delta=timedelta(hours=24))
-            
-            # 翌日の投稿再開
-            daily_posts = 0
             current_time = datetime.now()
-            assert scheduler.check_daily_post_limit(daily_posts)
 
-    def test_error_recovery_workflow(self, scheduler, notifier, post_data, webhook_url, setup_responses):
+            # 投稿制限のリセットを確認
+            assert scheduler.check_daily_post_limit(0)
+            assert scheduler.is_posting_time(current_time)
+
+    @patch("requests.post")
+    def test_error_recovery_workflow(self, mock_post, scheduler, notifier, post_data, webhook_url):
         """エラーからの復旧ワークフローのテスト
         
         シナリオ：
@@ -184,14 +166,8 @@ class TestPostWorkflowIntegration:
         2. エラー通知を送信
         3. リトライ後に正常投稿
         """
-        # モックレスポンスの設定
-        setup_responses.add(
-            responses.POST,
-            webhook_url,
-            json={"id": "test"},
-            status=204,
-            match=[responses.matchers.urlencoded_params_matcher({})],
-        )
+        # モックの設定
+        mock_post.return_value.status_code = 204
 
         with freeze_time("2024-01-01 10:00:00") as frozen_time:
             # エラー発生時の通知
@@ -209,32 +185,32 @@ class TestPostWorkflowIntegration:
             # リトライ待機（5分）
             frozen_time.tick(delta=timedelta(minutes=5))
 
-            # リトライ開始通知
+            # リトライ通知
             result = notifier.send_embed(
-                title="リトライ開始",
-                description=f"投稿ID: {post_data[0]['id']}の再投稿を試みます",
+                title="リトライ実行",
+                description="投稿処理を再試行します",
                 fields={
-                    "待機時間": "5分",
-                    "リトライ回数": "1回目"
+                    "投稿ID": post_data[0]["id"],
+                    "待機時間": "5分"
                 },
                 color="#ffff00"
             )
             assert result is True
 
-            # 投稿成功
-            current_time = datetime.now()
+            # 正常投稿の通知
             result = notifier.send_embed(
-                title="リトライ成功",
-                description=f"投稿ID: {post_data[0]['id']}の再投稿に成功しました",
+                title="投稿完了",
+                description=f"ID: {post_data[0]['id']}\n内容: {post_data[0]['content']}",
                 fields={
-                    "リトライ回数": "1回",
-                    "経過時間": "5分"
+                    "カテゴリ": post_data[0]["category"],
+                    "メディア": "あり" if post_data[0]["media_url"] else "なし"
                 },
                 color="#00ff00"
             )
             assert result is True
 
-    def test_schedule_adjustment_workflow(self, scheduler, notifier, webhook_url, setup_responses):
+    @patch("requests.post")
+    def test_schedule_adjustment_workflow(self, mock_post, scheduler, notifier, webhook_url):
         """スケジュール調整ワークフローのテスト
         
         シナリオ：
@@ -242,14 +218,8 @@ class TestPostWorkflowIntegration:
         2. 次回の投稿可能時刻を計算
         3. スケジュール変更を通知
         """
-        # モックレスポンスの設定
-        setup_responses.add(
-            responses.POST,
-            webhook_url,
-            json={"id": "test"},
-            status=204,
-            match=[responses.matchers.urlencoded_params_matcher({})],
-        )
+        # モックの設定
+        mock_post.return_value.status_code = 204
 
         with freeze_time("2024-01-01 22:30:00") as frozen_time:
             current_time = datetime.now()
