@@ -4,8 +4,8 @@ on:
   schedule:
     # 毎朝8時にスケジュール生成（JST）
     - cron: '0 23 * * *'  # UTC 23:00 = JST 8:00
-    # 2時間おきに投稿チェック（JST）
-    - cron: '0 1,3,5,7,9,11 * * *'  # UTC時間（JST-9時間）
+    # 30分ごとに投稿チェック（JST）
+    - cron: '*/30 * * * *'  # 毎時0分と30分に実行
   push:
     branches: [ main ]  # mainブランチへのプッシュ時
   workflow_dispatch:  # 手動実行用
@@ -22,7 +22,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v2
       with:
-        python-version: '3.x'
+        python-version: '3.10'  # 安定版のPythonを使用
         
     - name: Install dependencies
       run: |
@@ -72,7 +72,7 @@ jobs:
 
   # 定期的な投稿実行
   post:
-    if: github.event.schedule == '0 1,3,5,7,9,11 * * *' || (github.event_name == 'workflow_dispatch')
+    if: github.event.schedule == '*/30 * * * *' || (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -80,7 +80,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.x'
+          python-version: '3.10'  # 安定版のPythonを使用
           
       - name: Install dependencies
         run: |
@@ -107,7 +107,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.x'
+          python-version: '3.10'  # 安定版のPythonを使用
           
       - name: Install dependencies
         run: |

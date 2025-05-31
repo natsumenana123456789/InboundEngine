@@ -18,7 +18,7 @@ google-auth-httplib2==0.1.1
 oauth2client
 
 # 画像・動画処理
-Pillow==10.1.0
+Pillow==9.5.0
 
 # 日付処理
 python-dateutil==2.8.2
