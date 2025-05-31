@@ -5,4 +5,21 @@ notifiers:
     max_retries: 3
     rate_limit:
       max_requests: 5
-      window_seconds: 60 
+      window_seconds: 60
+
+spreadsheet:
+  sheet_id: "${SPREADSHEET_ID}"
+  credentials_path: "${GOOGLE_CREDENTIALS_PATH}"
+  sheet_name: "${SHEET_NAME}"
+
+twitter:
+  account1:
+    api_key: "${TWITTER_API_KEY_1}"
+    api_secret: "${TWITTER_API_SECRET_1}"
+    access_token: "${TWITTER_ACCESS_TOKEN_1}"
+    access_token_secret: "${TWITTER_ACCESS_TOKEN_SECRET_1}"
+  account2:
+    api_key: "${TWITTER_API_KEY_2}"
+    api_secret: "${TWITTER_API_SECRET_2}"
+    access_token: "${TWITTER_ACCESS_TOKEN_2}"
+    access_token_secret: "${TWITTER_ACCESS_TOKEN_SECRET_2}" 
