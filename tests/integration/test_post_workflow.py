@@ -70,7 +70,7 @@ class TestPostWorkflowIntegration:
             webhook_url,
             json={"id": "test"},
             status=204,
-            match=[responses.matchers.json_params_matcher({})],
+            match=[responses.matchers.urlencoded_params_matcher({})],
         )
 
         with freeze_time("2024-01-01 10:00:00") as frozen_time:
@@ -129,7 +129,7 @@ class TestPostWorkflowIntegration:
             webhook_url,
             json={"id": "test"},
             status=204,
-            match=[responses.matchers.json_params_matcher({})],
+            match=[responses.matchers.urlencoded_params_matcher({})],
         )
 
         with freeze_time("2024-01-01 10:00:00") as frozen_time:
@@ -190,7 +190,7 @@ class TestPostWorkflowIntegration:
             webhook_url,
             json={"id": "test"},
             status=204,
-            match=[responses.matchers.json_params_matcher({})],
+            match=[responses.matchers.urlencoded_params_matcher({})],
         )
 
         with freeze_time("2024-01-01 10:00:00") as frozen_time:
@@ -248,7 +248,7 @@ class TestPostWorkflowIntegration:
             webhook_url,
             json={"id": "test"},
             status=204,
-            match=[responses.matchers.json_params_matcher({})],
+            match=[responses.matchers.urlencoded_params_matcher({})],
         )
 
         with freeze_time("2024-01-01 22:30:00") as frozen_time:
