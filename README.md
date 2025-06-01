@@ -57,20 +57,21 @@ InboundEngineは、X（旧Twitter）への自動投稿を効率的に管理す�
 - **内容**: 全体概要、毎日の運用手順、アカウント管理、エラー対応
 - **用途**: 日常運用のメインガイド
 
-### 📖 **auto_post_bot (./bots/auto_post_bot/README 2.md)**
+<!-- ### 📖 **auto_post_bot (./bots/auto_post_bot/README 2.md)**
 - **対象ユーザー**: 開発者・設定変更担当者
 - **内容**: 自動投稿システムの技術詳細、Notion連携、プロファイル管理
-- **用途**: 自動投稿機能の詳細設定と開発
+- **用途**: 自動投稿機能の詳細設定と開発 -->
 
-### 📖 **curate_bot (./bots/curate_bot/README.md)**
+<!-- ### 📖 **curate_bot (./bots/curate_bot/README.md)**
 - **対象ユーザー**: キュレーション機能利用者
 - **内容**: X投稿収集、OCR機能、Notion連携の詳細
-- **用途**: コンテンツキュレーションシステムの設定と運用
+- **用途**: コンテンツキュレーションシステムの設定と運用 -->
 
-### 📖 **marshmallow (./bots/curate_bot/marshmallow/README.md)**
+<!-- ### 📖 **marshmallow (./bots/curate_bot/marshmallow/README.md)**
 - **対象ユーザー**: Marshmallow-QA利用者
 - **内容**: 質問・回答自動投稿機能
-- **用途**: Marshmallowサービスとの連携機能
+- **用途**: Marshmallowサービスとの連携機能 -->
+(注意: 上記の古いREADMEへの参照は、該当ファイルが削除されたためコメントアウトしました。開発者向けドキュメントは `docs/system_redesign_plan.md` および `engine_core` のコードコメントを参照してください。)
 
 ## 📝 毎日の運用手順
 
@@ -83,58 +84,48 @@ cd /path/to/InboundEngine
 source .venv/bin/activate
 
 # ログ確認（前日の投稿状況チェック）
-tail -20 logs/auto_post_logs/app.log
+tail -20 logs/app.log # ログファイル名はconfig.ymlで確認
 
-# 本日のスケジュール確認
-python schedule_posts.py
+# 本日のスケジュール確認 (スケジュールが生成されていれば表示)
+python main.py --view-schedule # または python main.py --view-schedule --date YYYY-MM-DD
+# (もし今日まだスケジュールがなければ) 今日のスケジュールを生成 (ドライラン)
+# python main.py --generate-schedule --dry-run
 ```
 
 ### 2. スケジュール投稿実行
 ```bash
-# 自動スケジュール生成（初回実行時）
-python schedule_posts.py
+# スケジュールされた投稿をまとめて実行 (config.ymlで設定された時間窓で実行)
+python main.py --execute-now
 
-# 現在時刻以降でスケジュール生成（中途半端な時間からでも対応）
-python schedule_posts.py --now
+# (オプション) スケジュール生成 (通常は cron やタスクスケジューラで定期実行)
+# python main.py --generate-schedule
+# python main.py --generate-schedule --force-regenerate # 強制再生成
 
-# 既存スケジュールを強制的に再生成
-python schedule_posts.py --force-regenerate
+# (参考) 旧 schedule_posts.py の機能は main.py に統合されました。
+# python schedule_posts.py # -> main.py --generate-schedule や main.py --view-schedule を使用
+# python schedule_posts.py --now # -> main.py --generate-schedule --start-from-now (のようなオプションを検討)
+# python schedule_posts.py --force-regenerate # -> main.py --generate-schedule --force-regenerate
 
-# 手動投稿実行
-python -m bots.auto_post_bot.post_tweet
-
-# または、定期実行の場合
-# crontabで設定された時間に自動実行される
+# (参考) 旧 手動投稿実行 (現在は main.py の --execute-now に統合、またはテスト用機能として別途検討)
+# python -m bots.auto_post_bot.post_tweet # -> main.py --execute-now (ただし、これはスケジュールベース)
 ```
 
 ### 2.1. 🕐 中途半端な時間からのスケジュール生成
+`main.py --generate-schedule` は、configで定義された1日のスケジュールを生成します。
+特定の時間から開始したい場合は、生成されたスケジュールファイル (`schedule.json`) を確認し、`main.py --execute-now` を適切なタイミングで実行するか、`--look-back-minutes` や `--look-forward-minutes` オプション（`main.py --execute-now` で利用可能）を調整して実行対象を制御します。
 
-**例：午後3時38分に始める場合**
-```bash
-# 現在時刻（15:38）以降でスケジュール生成
-python schedule_posts.py --now
+旧 `schedule_posts.py --now` のような「今から最適なスケジュールを再生成する」機能は、`main.py --generate-schedule --force-regenerate` でスケジュールを一旦クリアし再作成後、`main.py --execute-now` を実行する流れになります。
 
-# 実行例：
-# ⏰ 現在時刻 15:38 以降でスケジュール生成します
-# ✅ 新しいスケジュールを作成しました:
-#   hinataHHHHHH: 2025-05-30 17:33:00 (約1時間54分後)
-#   jadiAngkat: 2025-05-30 21:27:00 (約5時間48分後)
-```
-
-**営業時間外（22時以降）の場合**
-```bash
-python schedule_posts.py --now
-# ⏰ 現在時刻 23:15 は営業時間外です
-# 📅 翌日 (2025-05-31) の 10:00 からスケジュール生成します
-```
-
-**オプション一覧**
-- `--now`: 現在時刻以降でスケジュール生成
-- `--force-regenerate`: 既存スケジュールがあっても強制再生成
-- `--mark-executed ACCOUNT DATETIME`: 指定投稿を実行済みにマーク
+**`main.py` の主なオプション (詳細は `python main.py --help` を参照)**:
+- `--generate-schedule`: 投稿スケジュールを生成
+- `--execute-now`: スケジュールに基づき投稿を実行
+- `--view-schedule`: 生成済みスケジュールを表示
+- `--validate-config`: 設定ファイルを検証
+- `--use-test-schedule`: テスト用スケジュールファイルを使用 (config.ymlでパス設定)
+- その他、ログレベル制御など
 
 ### 3. 結果確認
-- **Slack**: 投稿成功/失敗の通知とスケジュール通知を確認
+- **Slack/Discord**: 投稿成功/失敗の通知とスケジュール通知を確認
 - **スプレッドシート**: 最終投稿日時と投稿済み回数が更新されているか確認
 - **ログファイル**: 詳細なエラー情報が必要な場合
 - **schedule.txt**: 当日の投稿スケジュール確認
@@ -171,10 +162,19 @@ auto_post_bot:
 ```
 
 ### 3. スケジュール設定に追加
-`schedule_posts.py` の `ACCOUNTS` リストに新しいアカウント名を追加:
+`config/config.yml` の `auto_post_bot.twitter_accounts` リストに、アカウントごとの `posts_today` (任意) や `worksheet_name` を設定します。
+`schedule_posts.py` の `ACCOUNTS` リストは廃止され、`config.yml` で一元管理されます。
 
-```python
-ACCOUNTS = ['jadiAngkat', 'hinataHHHHHH', '新アカウント名']
+```yaml
+auto_post_bot:
+  twitter_accounts:
+    - account_id: "新アカウント名"
+      # ... (consumer_keyなどのAPI情報)
+      google_sheets_source:
+        enabled: true
+        worksheet_name: "新しいワークシート名"
+      posts_today: 2 # このアカウントの1日の投稿数 (省略可)
+    # ... 他のアカウント ...
 ```
 
 ### 4. スプレッドシート準備
@@ -462,10 +462,10 @@ python schedule_posts.py
 crontab -e
 
 # 毎朝8時にスケジュール生成＋Slack通知
-0 8 * * * cd /path/to/InboundEngine && source .venv/bin/activate && python schedule_posts.py >> logs/schedule.log 2>&1
+0 8 * * * cd /path/to/InboundEngine && source .venv/bin/activate && python main.py --generate-schedule >> logs/cron_schedule_generation.log 2>&1
 
 # 毎日9時、13時、17時に投稿実行
-0 9,13,17 * * * cd /path/to/InboundEngine && source .venv/bin/activate && python -m bots.auto_post_bot.post_tweet >> logs/cron.log 2>&1
+0 9,13,17 * * * cd /path/to/InboundEngine && source .venv/bin/activate && python main.py --execute-now >> logs/cron_execute_posts.log 2>&1
 ```
 
 ### スケジュール管理の詳細

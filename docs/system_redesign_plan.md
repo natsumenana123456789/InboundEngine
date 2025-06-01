@@ -157,5 +157,5 @@ InboundEngine/
 
 ## 7. その他
 
--   古い `src` ディレクトリ内のPythonファイル群および `config/config_loader.py` は、上記移行ステップ完了後、プロジェクトから削除する。
+-   古い `src` ディレクトリ内のPythonファイル群および `config/config_loader.py` は、上記移行ステップ完了後、プロジェクトから削除する。(削除済み)
 -   テストコードも新しいディレクトリ構造に合わせて `tests/engine_core/` 以下に配置・整理する。 
