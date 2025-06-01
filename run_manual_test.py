@@ -110,7 +110,7 @@ def run_main_script(target_date_str: str):
     """main.py を実行する"""
     command = [
         "python", "main.py", 
-        "--process-now", 
+        # "--process-now",  # この行をコメントアウトまたは削除
         "--use-test-schedule", 
         "--info", 
         "--date", target_date_str

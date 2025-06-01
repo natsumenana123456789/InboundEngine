@@ -2,7 +2,7 @@ import logging
 import os
 import json
 from datetime import datetime, date, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 from .config import Config
 from .spreadsheet_manager import SpreadsheetManager
@@ -62,6 +62,18 @@ class WorkflowManager:
         else:
             self.workflow_notifier = None
             logger.warning("WorkflowManager用のDiscord通知クライアントが設定されていません。")
+
+        # DiscordNotifierの初期化 (日次サマリー通知用)
+        self.summary_notifier: Optional[DiscordNotifier] = None
+        if self.config.should_notify_daily_schedule_summary():
+            webhook_url = self.config.get_discord_webhook_url("default_notification") # または専用ID
+            if webhook_url:
+                self.summary_notifier = DiscordNotifier(webhook_url)
+                logger.info("日次スケジュールサマリー通知用のDiscordNotifierを初期化しました。")
+            else:
+                logger.warning("日次スケジュールサマリー通知は有効ですが、Discord Webhook URLが設定されていません。")
+        else:
+            logger.info("日次スケジュールサマリー通知は無効です。")
 
         logger.info("WorkflowManager初期化完了。")
 
@@ -297,3 +309,131 @@ class WorkflowManager:
                 description=f"{due_posts_count}件の投稿を処理し、{successful_posts_count}件が成功しました。詳細はログを確認してください。",
                 color=0x0000ff if successful_posts_count == due_posts_count else (0xffa500 if successful_posts_count > 0 else 0xff0000)
             ) 
+
+    def process_scheduled_posts_for_day(self, date_str: str, process_now: bool = False) -> Tuple[int, int]:
+        logger.info(f"{date_str} のスケジュール投稿処理を{( '現在時刻ベースで' if process_now else '予定時刻通りに' )}開始します。")
+        
+        try:
+            target_date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            # スケジュールファイルから対象日のスケジュールを読み込む
+            posts_for_today: List[ScheduledPost] = self._load_schedule_from_file(target_date_obj)
+            
+            if not posts_for_today:
+                logger.info(f"{date_str} の投稿予定はありません。")
+                if self.summary_notifier: # スケジュールが無くても「予定なし」と通知する
+                    logger.info(f"{date_str} のスケジュールサマリーをDiscordに通知します（予定なし）。")
+                    self.summary_notifier.send_schedule_summary_notification([], date_str)
+                return 0, 0
+            
+            logger.info(f"{date_str} のスケジュール ({len(posts_for_today)}件) を {self.schedule_file_path} から読み込みました。") # self.post_scheduler.schedule_file_path から self.schedule_file_path に変更
+
+            # === Discordへの日次スケジュールサマリー通知 ===
+            if self.summary_notifier:
+                logger.info(f"{date_str} のスケジュールサマリーをDiscordに通知します。")
+                try:
+                    self.summary_notifier.send_schedule_summary_notification(posts_for_today, date_str)
+                except Exception as e_notify:
+                    logger.error(f"Discordへの日次スケジュールサマリー通知中にエラー: {e_notify}", exc_info=True)
+            # === 通知処理ここまで ===
+
+            executed_today_count = 0
+            successful_posts_count = 0
+
+            already_executed_ids_for_day = set() # 初期化
+            if os.path.exists(self.executed_log_file_path):
+                try:
+                    with open(self.executed_log_file_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            try:
+                                log_entry = json.loads(line)
+                                # scheduled_timeはISO文字列なので、日付部分で比較
+                                if log_entry.get("success") and log_entry.get("scheduled_time", "").startswith(date_str):
+                                    # 実行済みIDの形式を ScheduledPost の scheduled_time (datetime オブジェクトのISO形式) に合わせる
+                                    # あるいは、より堅牢な一意のIDを ScheduledPost に持たせることを検討
+                                    # ここでは scheduled_time のISO文字列と account_id を使う
+                                    already_executed_ids_for_day.add((log_entry["account_id"], log_entry["scheduled_time"]))
+                            except json.JSONDecodeError:
+                                logger.debug(f"実行ログの不正な行をスキップ: {line.strip()}")
+                                continue
+                except Exception as e:
+                    logger.error(f"実行ログファイルの読み込みエラー（日次処理）: {e}", exc_info=True)
+
+
+            tasks_to_run = []
+            for post in posts_for_today:
+                # post['scheduled_time'] は _load_schedule_from_file により datetime オブジェクトのはず
+                task_key_for_check = (post['account_id'], post['scheduled_time'].isoformat())
+
+                if task_key_for_check in already_executed_ids_for_day:
+                    logger.info(f"タスク {post['account_id']} @ {post['scheduled_time'].isoformat()} は既に実行済みのためスキップします。")
+                    continue
+
+                scheduled_time_utc = post['scheduled_time'] # 既にUTCのdatetimeのはず
+                # 念のためタイムゾーン確認と付与 (load_schedule_from_file で付与されているはず)
+                if scheduled_time_utc.tzinfo is None:
+                    scheduled_time_utc = scheduled_time_utc.replace(tzinfo=timezone.utc)
+
+                now_utc = datetime.now(timezone.utc)
+
+                if process_now or scheduled_time_utc <= now_utc:
+                    tasks_to_run.append(post)
+                else:
+                    logger.info(f"タスク {post['account_id']} @ {scheduled_time_utc.strftime('%H:%M:%S UTC')} はまだ実行時刻ではありません。")
+            
+            logger.info(f"実行対象タスク (日次): {[(t['account_id'], t['scheduled_time'].isoformat()) for t in tasks_to_run]}")
+
+            for scheduled_post_data in tasks_to_run:
+                executed_today_count += 1
+                # scheduled_post_data は ScheduledPost 型なので、そのまま渡せる
+                returned_tweet_id: Optional[str] = None
+                success_flag: bool = False
+                error_reason_val: Optional[str] = "不明な実行エラー"
+                try:
+                    returned_tweet_id = self.post_executor.execute_post(scheduled_post_data)
+                    if returned_tweet_id:
+                        successful_posts_count += 1
+                        success_flag = True
+                        error_reason_val = None
+                    else:
+                        error_reason_val = "投稿実行条件未達 (記事なし等) またはAPIエラー (Executorログ参照)"
+                        logger.warning(f"タスク ({scheduled_post_data['account_id']}, {scheduled_post_data['scheduled_time'].isoformat()}) は実行されましたが、投稿には至りませんでした (Tweet IDなし)。")
+                except Exception as e:
+                    logger.error(f"タスク ({scheduled_post_data['account_id']}, {scheduled_post_data['scheduled_time'].isoformat()}) の日次実行中に予期せぬエラー: {e}", exc_info=True)
+                    error_reason_val = str(e)
+                    # success_flag は False のまま
+                finally:
+                    # _log_executed_post は ScheduledPost 型を期待する
+                    self._log_executed_post(scheduled_post_data, success_flag, tweet_id=returned_tweet_id, error_reason=error_reason_val)
+            
+            logger.info(f"{date_str} のスケジュール投稿処理完了。実行対象 {len(tasks_to_run)}件中、成功 {successful_posts_count}件。")
+            return len(tasks_to_run), successful_posts_count
+
+        except Exception as e:
+            logger.error(f"{date_str} のスケジュール投稿処理中に予期せぬエラー: {e}", exc_info=True)
+            return 0, 0 # エラー時は実行数0、成功数0として返す
+
+    def notify_workflow_completion(self, date_str: str, total_processed: int, total_successful: int):
+        # ... (既存のワークフロー完了通知メソッド)
+        # こちらは post_executor が個別の成功/失敗通知を行うので、重複を避けるか、サマリーに特化するか検討
+        # 現状は main.py から呼び出されている
+        if not self.config.get("auto_post_bot.discord_notification.enabled", False):
+            return
+        
+        # この通知は post_executor とは別に、WorkflowManager が完了を通知する想定
+        # ここでは summary_notifier を使う (post_executorが使うものと同じインスタンスでよいか、設定を分けるか)
+        if self.summary_notifier: # summary_notifierが初期化されていれば使う
+            title = f"⚙️ {date_str} バッチ処理完了"
+            description = f"処理対象タスク数: {total_processed}\n成功タスク数: {total_successful}"
+            color = 0x0000FF # 青色
+            if total_processed > 0 and total_successful < total_processed:
+                color = 0xFFA500 # オレンジ (一部失敗)
+            elif total_processed > 0 and total_successful == 0:
+                color = 0xFF0000 # 赤 (全失敗)
+            elif total_processed == 0:
+                color = 0x808080 # グレー (実行対象なし)
+            
+            self.summary_notifier.send_simple_notification(title, description, color=color)
+        else:
+            logger.info("Discord通知が無効か、またはsummary_notifierが初期化されていないため、ワークフロー完了通知をスキップします。")
+
+# ... (もし __main__ ブロックがあれば、ConfigインスタンスをWorkflowManagerに渡すように修正) 

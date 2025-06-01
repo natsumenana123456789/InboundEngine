@@ -13,6 +13,7 @@ auto_post_bot:
   discord_notification:
     enabled: true
     webhook_url: "https://discord.com/api/webhooks/1378206571556765707/8_9FQToOU1qwc7xESSfJlizX9Xx-Ls1NxZQMF0Xht9wuTR9FozY9PihorKn0RromKqRp"
+    notify_daily_schedule_summary: true
   schedule_settings:
     start_hour: 10
     end_hour: 22

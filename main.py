@@ -138,15 +138,20 @@ def main():
             logger.info(f"{target_d.isoformat()} のスケジュールを生成します... 強制: {args.force_regenerate}")
             workflow_manager.generate_daily_schedule(target_date=target_d, force_regenerate=args.force_regenerate)
         
+        # process_now が指定された場合はこちらを実行
         if args.process_now:
             logger.info(f"{target_d.isoformat()} のスケジュール投稿処理を実行します...")
-            # WorkflowManager 内では timezone.utc を使用しているので、日付のみを渡す
             workflow_manager.process_scheduled_posts_now(target_date=target_d) 
         
+        # generate_schedule も process_now も指定されなかった場合、その日の全スケジュールを処理
         if not args.generate_schedule and not args.process_now:
-            print("実行するアクションが指定されていません。--generate-schedule または --process-now を使用してください。")
-            parser.print_help()
-            exit(1) # 何も実行しない場合はエラーコードで終了
+            logger.info(f"{target_d.isoformat()} のスケジュール処理を開始します (日次バッチ)。")
+            # process_scheduled_posts_for_day は日付文字列を期待するので target_d.isoformat() を渡す
+            total_processed, total_successful = workflow_manager.process_scheduled_posts_for_day(date_str=target_d.isoformat())
+            logger.info(f"{target_d.isoformat()} の日次バッチ処理完了。処理対象 {total_processed}件、成功 {total_successful}件。")
+            # 必要であれば、ここで workflow_manager.notify_workflow_completion を呼び出す
+            # 現在の実装では process_scheduled_posts_for_day の中でサマリー通知がされるので、重複を避けるか検討
+            # ここでは、完了ログのみ出力
 
         logger.info("システムメイン処理を正常に終了しました。")
 

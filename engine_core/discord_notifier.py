@@ -1,6 +1,6 @@
 import requests
 import logging
-from datetime import datetime # datetimeクラスを直接インポート
+from datetime import datetime, timezone, timedelta # datetimeクラスを直接インポート
 from typing import Optional, Dict, Any, List
 
 # このモジュールがengine_coreパッケージ内にあることを想定してConfigをインポート
@@ -60,6 +60,67 @@ class DiscordNotifier:
         }
         return self.send_message(embeds=[embed])
 
+    def send_schedule_summary_notification(self, scheduled_posts: List[Dict[str, Any]], target_date_str: str, bot_username: Optional[str] = "スケジュール通知") -> bool:
+        """指定された日付の投稿スケジュール概要をDiscordに通知する。"""
+        if not scheduled_posts:
+            title = f"{target_date_str} の投稿スケジュール"
+            description = "本日の投稿予定はありません。"
+            color = 0x808080 # グレー
+            return self.send_simple_notification(title, description, color=color)
+
+        jst = timezone(timedelta(hours=9), name='JST')
+        
+        # アカウントごとにグループ化し、時刻でソート
+        posts_by_account: Dict[str, List[Dict[str, Any]]] = {}
+        for post in scheduled_posts:
+            account_id = post.get("account_id", "不明なアカウント")
+            if account_id not in posts_by_account:
+                posts_by_account[account_id] = []
+            posts_by_account[account_id].append(post)
+        
+        for account_id in posts_by_account:
+            posts_by_account[account_id].sort(key=lambda p: p.get("scheduled_time"))
+
+        embed_description_parts = [f"**🗓️ {target_date_str} の投稿スケジュール ({len(scheduled_posts)}件)**\n"]
+
+        for account_id, posts in posts_by_account.items():
+            embed_description_parts.append(f"\n**アカウント: {account_id} ({len(posts)}件)**")
+            for post in posts:
+                scheduled_time_utc = post.get("scheduled_time") # WorkflowManagerからはdatetimeオブジェクトで渡される想定
+                worksheet_name = post.get("worksheet_name", "(シート名不明)")
+                
+                time_str_jst = "(時刻不明)"
+                if isinstance(scheduled_time_utc, datetime):
+                    # JSTに変換してフォーマット
+                    scheduled_time_jst = scheduled_time_utc.astimezone(jst)
+                    time_str_jst = scheduled_time_jst.strftime("%H:%M") 
+                elif isinstance(scheduled_time_utc, str): # 文字列の場合も一応対応 (ISOフォーマット想定)
+                    try:
+                        dt_utc = datetime.fromisoformat(scheduled_time_utc.replace('Z', '+00:00'))
+                        dt_jst = dt_utc.astimezone(jst)
+                        time_str_jst = dt_jst.strftime("%H:%M")
+                    except ValueError:
+                        logger.warning(f"スケジュール時刻文字列のパース失敗: {scheduled_time_utc}")
+                        time_str_jst = scheduled_time_utc # パース失敗時はそのまま表示
+                
+                embed_description_parts.append(f"- `{time_str_jst} JST` : {worksheet_name}")
+        
+        embed_description = "\n".join(embed_description_parts)
+        
+        # Discordの埋め込みメッセージのdescriptionは4096文字制限があるため、長すぎる場合は分割送信などを検討する必要がある
+        # ここでは一旦、長すぎる場合は警告を出すのみ
+        if len(embed_description) > 4000: # 少し余裕を持たせる
+            logger.warning("生成されたスケジュールサマリーが長すぎるため、Discord通知が失敗する可能性があります。")
+            # TODO: 必要に応じてメッセージ分割ロジックを実装
+
+        embed = {
+            "title": f"投稿スケジュール ({target_date_str})",
+            "description": embed_description,
+            "color": 0x1E90FF,  # DodgerBlue
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        return self.send_message(embeds=[embed], username=bot_username)
 
 if __name__ == '__main__':
     import os # if __name__ 内でのみ使用
@@ -133,6 +194,21 @@ if __name__ == '__main__':
             if success_simple_err: logger.info("簡易通知(エラー)送信成功。")
             else: logger.error("簡易通知(エラー)送信失敗。")
 
+            logger.info("スケジュールサマリーのテスト...")
+            scheduled_posts = [
+                {"account_id": "Account1", "scheduled_time": "2024-04-01T10:00:00", "worksheet_name": "Worksheet1"},
+                {"account_id": "Account2", "scheduled_time": "2024-04-01T11:00:00", "worksheet_name": "Worksheet2"},
+                {"account_id": "Account1", "scheduled_time": "2024-04-01T12:00:00", "worksheet_name": "Worksheet3"},
+            ]
+            success_schedule_summary = notifier.send_schedule_summary_notification(
+                scheduled_posts=scheduled_posts,
+                target_date_str="2024年4月1日",
+                bot_username="スケジュール通知ボット"
+            )
+            if success_schedule_summary:
+                logger.info("スケジュールサマリー送信成功。")
+            else:
+                logger.error("スケジュールサマリー送信失敗。")
 
         except ValueError as ve:
             logger.error(f"設定エラー: {ve}")

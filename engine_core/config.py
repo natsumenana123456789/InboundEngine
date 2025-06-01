@@ -104,7 +104,7 @@ class Config:
         logger.warning(f"TwitterアカウントID '{account_id}' の設定が見つかりません。")
         return None
 
-    def get_discord_webhook_url(self, notifier_id: str = "default") -> Optional[str]:
+    def get_discord_webhook_url(self, notification_id: str = "default_notification") -> Optional[str]:
         # notifier_id を無視し、固定のパスからwebhook_urlを取得
         return self.get("auto_post_bot.discord_notification.webhook_url")
 
@@ -149,6 +149,10 @@ class Config:
 
     def get_logs_directory(self) -> Optional[str]:
         return self.get("common.logs_directory", "logs") # デフォルト値を "logs" に設定
+
+    def should_notify_daily_schedule_summary(self) -> bool:
+        """日次スケジュールサマリーをDiscordに通知するかどうかを取得する。"""
+        return self.get('auto_post_bot.discord_notification.notify_daily_schedule_summary', False)
 
     # 必要に応じて他の設定値取得メソッドを追加
 
