@@ -17,8 +17,8 @@ auto_post_bot:
     start_hour: 10
     end_hour: 22
     min_interval_minutes: 1
-    schedule_file: "logs/schedule.txt"
-    executed_file: "logs/executed.txt"
+    schedule_file: "schedule.txt"
+    executed_file: "executed.txt"
     test_schedule_file: "test_schedule.txt"  # ← テスト用スケジュールファイル 
     test_executed_file: "test_executed.txt" # ← テスト用実行済み記録ファイル 
 
@@ -32,7 +32,7 @@ auto_post_bot:
 
   slack_webhook_url: ""
   sheet_name: "投稿ストック"
-  columns: ["ID", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
+  columns: ["ID", "本文", "文字数", "画像/動画URL", "最終投稿日時", "投稿可能", "投稿済み回数"]
   
   google_sheets_source:
     enabled: true

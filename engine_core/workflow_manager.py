@@ -119,8 +119,13 @@ class WorkflowManager:
                 try:
                     # datetimeをISO文字列からパース。タイムゾーン情報を付与（UTCと仮定）
                     # もし保存時にタイムゾーンがなければ、ここで付与する。パース時に awareにする。
-                    scheduled_time_dt = datetime.fromisoformat(item_dict["scheduled_time"])
-                    if scheduled_time_dt.tzinfo is None:
+                    time_str = item_dict["scheduled_time"]
+                    if time_str.endswith('Z'):
+                        time_str = time_str[:-1] + '+00:00'
+                    scheduled_time_dt = datetime.fromisoformat(time_str)
+
+                    if scheduled_time_dt.tzinfo is None: # 基本的には+00:00でawareになるはず
+                         logger.warning(f"Parsed datetime {scheduled_time_dt} is naive, forcing UTC. Original str: {item_dict['scheduled_time']}")
                          scheduled_time_dt = scheduled_time_dt.replace(tzinfo=timezone.utc)
 
                     schedule.append({

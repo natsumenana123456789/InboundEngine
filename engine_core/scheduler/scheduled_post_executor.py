@@ -66,14 +66,15 @@ class ScheduledPostExecutor:
 
         if not text_content:
             logger.warning(f"アカウント '{account_id}' (記事ID: {article_id}, 行: {row_index}) の本文が空です。投稿をスキップします。")
-            self._notify_failure(account_id, worksheet_name, f"記事ID '{article_id}' の本文が空", scheduled_time, article_id)
+            # 本文が空の場合でも、その情報を通知に含めるため text_content はそのまま渡す
+            self._notify_failure(account_id, worksheet_name, f"記事ID '{article_id}' の本文が空", scheduled_time, article_id, text_content)
             return None
 
         # 2. TwitterClientを初期化
         account_details = self.config.get_active_twitter_account_details(account_id)
         if not account_details:
             logger.error(f"アカウント '{account_id}' のTwitter APIキー設定が見つかりません。")
-            self._notify_failure(account_id, worksheet_name, "APIキー設定なし", scheduled_time, article_id)
+            self._notify_failure(account_id, worksheet_name, "APIキー設定なし", scheduled_time, article_id, text_content)
             return None
         
         try:
@@ -86,7 +87,7 @@ class ScheduledPostExecutor:
             )
         except ValueError as ve:
             logger.error(f"アカウント '{account_id}' のTwitterClient初期化失敗: {ve}", exc_info=True)
-            self._notify_failure(account_id, worksheet_name, f"TwitterClient初期化エラー: {ve}", scheduled_time, article_id)
+            self._notify_failure(account_id, worksheet_name, f"TwitterClient初期化エラー: {ve}", scheduled_time, article_id, text_content)
             return None
 
         # 3. Twitterに投稿
@@ -99,13 +100,13 @@ class ScheduledPostExecutor:
                 posted_tweet_data = twitter_client.post_tweet(text=text_content)
         except Exception as e: # post_with_media_url内でエラーはキャッチ・ログされるが、念のため
             logger.error(f"アカウント '{account_id}' (記事ID: {article_id}) のツイート投稿中に予期せぬ最上位エラー: {e}", exc_info=True)
-            self._notify_failure(account_id, worksheet_name, f"ツイート投稿エラー: {e}", scheduled_time, article_id)
+            self._notify_failure(account_id, worksheet_name, f"ツイート投稿エラー: {e}", scheduled_time, article_id, text_content)
             return None
 
         if not posted_tweet_data or not posted_tweet_data.get("id"):
             logger.error(f"アカウント '{account_id}' (記事ID: {article_id}) のツイート投稿に失敗しました。APIからの応答が不正です。")
             # 失敗理由はTwitterClient側でログ出力されているはず
-            self._notify_failure(account_id, worksheet_name, "ツイートAPI応答エラー", scheduled_time, article_id)
+            self._notify_failure(account_id, worksheet_name, "ツイートAPI応答エラー", scheduled_time, article_id, text_content)
             return None
         
         tweet_id = str(posted_tweet_data.get("id"))
@@ -119,45 +120,46 @@ class ScheduledPostExecutor:
                 # 更新失敗は致命的ではないかもしれないが、警告は出す
                 logger.warning(f"アカウント '{account_id}' (記事ID: {article_id}, 行: {row_index}) のスプレッドシート更新に失敗しました。")
                 # 通知にも追記する
-                self._notify_success(account_id, worksheet_name, article_id, tweet_id, scheduled_time, warning_message="スプレッドシート更新失敗")
+                self._notify_success(account_id, worksheet_name, article_id, tweet_id, scheduled_time, text_content, warning_message="スプレッドシート更新失敗")
             else:
-                self._notify_success(account_id, worksheet_name, article_id, tweet_id, scheduled_time)
+                self._notify_success(account_id, worksheet_name, article_id, tweet_id, scheduled_time, text_content)
         except Exception as e:
             logger.error(f"アカウント '{account_id}' (記事ID: {article_id}, 行: {row_index}) のスプレッドシート更新中にエラー: {e}", exc_info=True)
-            self._notify_success(account_id, worksheet_name, article_id, tweet_id, scheduled_time, warning_message=f"スプレッドシート更新エラー: {e}")
+            self._notify_success(account_id, worksheet_name, article_id, tweet_id, scheduled_time, text_content, warning_message=f"スプレッドシート更新エラー: {e}")
             # ここではツイート自体は成功しているのでTrueを返す
 
         return tweet_id
 
-    def _notify_success(self, account_id: str, worksheet_name: str, article_id: str, tweet_id: str, scheduled_time: datetime, warning_message: Optional[str] = None):
+    def _notify_success(self, account_id: str, worksheet_name: str, article_id: str, tweet_id: str, scheduled_time: datetime, text_content: Optional[str], warning_message: Optional[str] = None):
         if not self.default_notifier:
             return
         title = f"✅ [成功] {account_id} ツイート投稿完了"
         description = (
             f"アカウント: `{account_id}`\n"
             f"ワークシート: `{worksheet_name}`\n"
-            f"記事ID: `{article_id}`\n"
-            f"ツイートID: `{tweet_id}` (https://twitter.com/anyuser/status/{tweet_id})\n"
-            f"予定時刻: `{scheduled_time.strftime('%Y-%m-%d %H:%M')}`\n"
             f"実行時刻: `{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`"
         )
+        if text_content:
+            processed_text = text_content[:50].replace('\n', ' ')
+            description += f"\n本文冒頭: `{processed_text}...`"
         if warning_message:
             description += f"\n\n⚠️ **警告:** {warning_message}"
             self.default_notifier.send_simple_notification(title, description, color=0xffa500) # オレンジ色
         else:
             self.default_notifier.send_simple_notification(title, description, color=0x00ff00) # 緑色
 
-    def _notify_failure(self, account_id: str, worksheet_name: Optional[str], reason: str, scheduled_time: datetime, article_id: Optional[str] = None):
+    def _notify_failure(self, account_id: str, worksheet_name: Optional[str], reason: str, scheduled_time: datetime, article_id: Optional[str] = None, text_content: Optional[str] = None):
         if not self.default_notifier:
             return
         title = f"❌ [失敗] {account_id} ツイート投稿失敗"
         description = (
             f"アカウント: `{account_id}`\n"
             f"ワークシート: `{worksheet_name or 'N/A'}`\n"
-            f"記事ID: `{article_id or 'N/A'}`\n"
-            f"予定時刻: `{scheduled_time.strftime('%Y-%m-%d %H:%M')}`\n"
             f"エラー理由: {reason}"
         )
+        if text_content:
+            processed_text = text_content[:50].replace('\n', ' ')
+            description += f"\n試行本文冒頭: `{processed_text}...`"
         self.default_notifier.send_simple_notification(title, description, error=True)
     
     # def _notify_no_content(self, account_id: str, worksheet_name: str, scheduled_time: datetime):

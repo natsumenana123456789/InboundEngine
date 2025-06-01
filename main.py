@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__) # main.py 用のロガー
 # ライブラリのロガーレベルを調整
 logging.getLogger("urllib3").setLevel(logging.INFO)
 logging.getLogger("tweepy").setLevel(logging.INFO)
+logging.getLogger("requests").setLevel(logging.INFO)
+logging.getLogger("requests_oauthlib").setLevel(logging.WARNING)
+logging.getLogger("oauthlib").setLevel(logging.WARNING)
 
 def main():
     logger.info("システムメイン処理を開始します。")

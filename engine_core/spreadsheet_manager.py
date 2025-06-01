@@ -1,6 +1,6 @@
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 from typing import List, Dict, Optional, Tuple, Any
 
@@ -149,14 +149,18 @@ class SpreadsheetManager:
             # "最終投稿日時" 列を更新
             last_posted_col_idx = self._get_column_index("最終投稿日時")
             
+            # posted_at をJSTに変換
+            jst = timezone(timedelta(hours=9))
+            posted_at_jst = posted_at.astimezone(jst)
+
             # 更新する値をリストで準備
             updates = [
                 gspread.Cell(row_index, posted_count_col_idx, str(new_posted_count)),
-                gspread.Cell(row_index, last_posted_col_idx, posted_at.strftime("%Y-%m-%d %H:%M:%S"))
+                gspread.Cell(row_index, last_posted_col_idx, posted_at_jst.strftime("%Y-%m-%d %H:%M:%S")) # JSTでフォーマット
             ]
             worksheet.update_cells(updates, value_input_option='USER_ENTERED')
             
-            logger.info(f"ワークシート '{worksheet_name}' 行 {row_index} のステータスを更新しました (投稿回数: {new_posted_count}, 最終投稿: {posted_at.strftime('%Y-%m-%d %H:%M:%S')})。")
+            logger.info(f"ワークシート '{worksheet_name}' 行 {row_index} のステータスを更新しました (投稿回数: {new_posted_count}, 最終投稿(JST): {posted_at_jst.strftime('%Y-%m-%d %H:%M:%S')})。")
             return True
         except gspread.exceptions.WorksheetNotFound:
             logger.error(f"ワークシート '{worksheet_name}' が見つかりません。更新できませんでした。")
