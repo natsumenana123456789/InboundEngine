@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: '実行するアクション'
+        description: '実行するアクション (schedule | schedule-now | post)'
         required: true
         default: 'post'
         type: choice
@@ -31,18 +31,19 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4 # checkoutのバージョンをv4に更新
     
     - name: 🐍 Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.10' # バージョン統一
     
     - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
+    # この通知スクリプトのパスと動作は現状維持。問題があれば別途修正。
     - name: 📢 Discord Push通知
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -64,59 +65,35 @@ jobs:
     - name: 🐍 Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.10' # バージョン統一
         
     - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: 🔧 Create config files
+    - name: 🔧 Create config files from template
+      env:
+        # --- ここに config/generate_config.py が必要とする全てのsecretsを環境変数として定義 ---
+        # 例: (実際のsecrets名はリポジトリに合わせてください)
+        # ACCOUNT1_CONSUMER_KEY: ${{ secrets.ACCOUNT1_CONSUMER_KEY }}
+        # ACCOUNT1_CONSUMER_SECRET: ${{ secrets.ACCOUNT1_CONSUMER_SECRET }}
+        # ACCOUNT1_ACCESS_TOKEN: ${{ secrets.ACCOUNT1_ACCESS_TOKEN }}
+        # ACCOUNT1_ACCESS_TOKEN_SECRET: ${{ secrets.ACCOUNT1_ACCESS_TOKEN_SECRET }}
+        # ACCOUNT1_BEARER_TOKEN: ${{ secrets.ACCOUNT1_BEARER_TOKEN }} # Optional
+        # ACCOUNT2_CONSUMER_KEY: ${{ secrets.ACCOUNT2_CONSUMER_KEY }}
+        # ... 他のアカウントや共通のsecretも同様に ...
+        DISCORD_WEBHOOK_URL_SECRET: ${{ secrets.DISCORD_WEBHOOK_URL }} # generate_config.py側での参照名に合わせる
+        GOOGLE_SHEETS_KEY_JSON_SECRET: ${{ secrets.GOOGLE_SHEETS_KEY }} # JSON文字列をそのまま渡す
+        # --- ここまで secrets 定義 ---
       run: |
         mkdir -p config logs
-        cat > config/config.yml << 'EOF'
-        common:
-          log_level: "INFO"
-          file_paths:
-            google_key_file: "gspread-key.json"
-        twitter_api:
-          bearer_token: "${{ secrets.TWITTER_BEARER_TOKEN }}"
-          consumer_key: "${{ secrets.TWITTER_CONSUMER_KEY }}"
-          consumer_secret: "${{ secrets.TWITTER_CONSUMER_SECRET }}"
-          access_token: "${{ secrets.TWITTER_ACCESS_TOKEN }}"
-          access_token_secret: "${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}"
-        auto_post_bot:
-          discord_webhook_url: "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          sheet_name: "投稿ストック"
-          columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
-          twitter_accounts:
-            - account_id: "jadiAngkat"
-              username: "jadiAngkat"
-              email: "${{ secrets.ACCOUNT1_EMAIL }}"
-              consumer_key: "${{ secrets.ACCOUNT1_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.ACCOUNT1_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.ACCOUNT1_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.ACCOUNT1_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内メンエス"
-            - account_id: "hinataHHHHHH"
-              username: "hinataHHHHHH"
-              email: "${{ secrets.ACCOUNT2_EMAIL }}"
-              consumer_key: "${{ secrets.ACCOUNT2_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.ACCOUNT2_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.ACCOUNT2_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.ACCOUNT2_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内セクキャバ"
-        EOF
-        echo '${{ secrets.GOOGLE_SHEETS_KEY }}' > config/gspread-key.json
+        python config/generate_config.py # このスクリプトが config/config.yml と config/gspread-key.json を生成する
         
     - name: 📅 Generate schedule
-      run: python schedule_posts.py
+      run: python main.py --generate-schedule --date $(TZ='Asia/Tokyo' date +%Y-%m-%d)
 
-  # 現在時刻からスケジュール生成ジョブ
+  # 現在時刻からスケジュール生成ジョブ (手動実行用)
   schedule-now:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'schedule-now'
     runs-on: ubuntu-latest
@@ -127,61 +104,33 @@ jobs:
     - name: 🐍 Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.10' # バージョン統一
         
     - name: 📦 Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: 🔧 Create config files
+    - name: 🔧 Create config files from template
+      env:
+        # --- 同様に、必要な全てのsecretsを環境変数として定義 ---
+        # ACCOUNT1_CONSUMER_KEY: ${{ secrets.ACCOUNT1_CONSUMER_KEY }}
+        # ...
+        DISCORD_WEBHOOK_URL_SECRET: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        GOOGLE_SHEETS_KEY_JSON_SECRET: ${{ secrets.GOOGLE_SHEETS_KEY }}
+        # ---
       run: |
         mkdir -p config logs
-        cat > config/config.yml << 'EOF'
-        common:
-          log_level: "INFO"
-          file_paths:
-            google_key_file: "gspread-key.json"
-        twitter_api:
-          bearer_token: "${{ secrets.TWITTER_BEARER_TOKEN }}"
-          consumer_key: "${{ secrets.TWITTER_CONSUMER_KEY }}"
-          consumer_secret: "${{ secrets.TWITTER_CONSUMER_SECRET }}"
-          access_token: "${{ secrets.TWITTER_ACCESS_TOKEN }}"
-          access_token_secret: "${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}"
-        auto_post_bot:
-          discord_webhook_url: "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          sheet_name: "投稿ストック"
-          columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
-          twitter_accounts:
-            - account_id: "jadiAngkat"
-              username: "jadiAngkat"
-              email: "${{ secrets.ACCOUNT1_EMAIL }}"
-              consumer_key: "${{ secrets.ACCOUNT1_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.ACCOUNT1_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.ACCOUNT1_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.ACCOUNT1_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内メンエス"
-            - account_id: "hinataHHHHHH"
-              username: "hinataHHHHHH"
-              email: "${{ secrets.ACCOUNT2_EMAIL }}"
-              consumer_key: "${{ secrets.ACCOUNT2_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.ACCOUNT2_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.ACCOUNT2_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.ACCOUNT2_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内セクキャバ"
-        EOF
-        echo '${{ secrets.GOOGLE_SHEETS_KEY }}' > config/gspread-key.json
+        python config/generate_config.py
         
-    - name: ⏰ Generate schedule from current time
-      run: python schedule_posts.py --now
+    - name: ⏰ Generate schedule from current time (force regenerate)
+      run: python main.py --generate-schedule --date $(TZ='Asia/Tokyo' date +%Y-%m-%d) --force-regenerate
 
   # 投稿実行ジョブ
   post:
-    if: github.event.schedule != '0 23 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'post')
+    # cronトリガーが schedule ジョブと被らないように条件を調整
+    # '0 23 * * *' 以外、または手動実行で action == 'post' の場合
+    if: (github.event.schedule != '0 23 * * *' && github.event.schedule != '') || (github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'post')
     runs-on: ubuntu-latest
     steps:
     - name: 📁 Checkout
@@ -190,7 +139,7 @@ jobs:
     - name: 🐍 Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.10' # バージョン統一
         
     - name: 🎬 Install FFmpeg
       run: sudo apt-get update && sudo apt-get install -y ffmpeg
@@ -200,47 +149,17 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: 🔧 Create config files
+    - name: 🔧 Create config files from template
+      env:
+        # --- 同様に、必要な全てのsecretsを環境変数として定義 ---
+        # ACCOUNT1_CONSUMER_KEY: ${{ secrets.ACCOUNT1_CONSUMER_KEY }}
+        # ...
+        DISCORD_WEBHOOK_URL_SECRET: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        GOOGLE_SHEETS_KEY_JSON_SECRET: ${{ secrets.GOOGLE_SHEETS_KEY }}
+        # ---
       run: |
         mkdir -p config logs
-        cat > config/config.yml << 'EOF'
-        common:
-          log_level: "INFO"
-          file_paths:
-            google_key_file: "gspread-key.json"
-        twitter_api:
-          bearer_token: "${{ secrets.TWITTER_BEARER_TOKEN }}"
-          consumer_key: "${{ secrets.TWITTER_CONSUMER_KEY }}"
-          consumer_secret: "${{ secrets.TWITTER_CONSUMER_SECRET }}"
-          access_token: "${{ secrets.TWITTER_ACCESS_TOKEN }}"
-          access_token_secret: "${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}"
-        auto_post_bot:
-          discord_webhook_url: "${{ secrets.DISCORD_WEBHOOK_URL }}"
-          sheet_name: "投稿ストック"
-          columns: ["ID", "投稿タイプ", "最終投稿日時", "文字数", "本文", "画像/動画URL", "投稿可能", "投稿済み回数"]
-          twitter_accounts:
-            - account_id: "jadiAngkat"
-              username: "jadiAngkat"
-              email: "${{ secrets.ACCOUNT1_EMAIL }}"
-              consumer_key: "${{ secrets.ACCOUNT1_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.ACCOUNT1_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.ACCOUNT1_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.ACCOUNT1_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内メンエス"
-            - account_id: "hinataHHHHHH"
-              username: "hinataHHHHHH"
-              email: "${{ secrets.ACCOUNT2_EMAIL }}"
-              consumer_key: "${{ secrets.ACCOUNT2_CONSUMER_KEY }}"
-              consumer_secret: "${{ secrets.ACCOUNT2_CONSUMER_SECRET }}"
-              access_token: "${{ secrets.ACCOUNT2_ACCESS_TOKEN }}"
-              access_token_secret: "${{ secrets.ACCOUNT2_ACCESS_TOKEN_SECRET }}"
-              google_sheets_source:
-                enabled: true
-                worksheet_name: "都内セクキャバ"
-        EOF
-        echo '${{ secrets.GOOGLE_SHEETS_KEY }}' > config/gspread-key.json
+        python config/generate_config.py
         
     - name: 🤖 Run auto post
-      run: python bots/auto_post_bot/post_tweet.py 
+      run: python main.py --process-now --date $(TZ='Asia/Tokyo' date +%Y-%m-%d)
