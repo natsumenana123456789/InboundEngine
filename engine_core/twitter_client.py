@@ -5,6 +5,7 @@ import requests
 import time
 from typing import Optional, Dict, Any, List # List を追加
 from datetime import datetime # datetime を追加
+import io # io を追加
 
 # このモジュールがengine_coreパッケージ内にあることを想定してConfigをインポート
 # ただし、TwitterClient自体はConfigに直接依存せず、キーは外部から渡される想定
@@ -75,6 +76,67 @@ class TwitterClient:
             response = requests.get(media_url, stream=True)
             response.raise_for_status() # HTTPエラーチェック
             
+            # Google Driveの共有リンクを直接ダウンロード用URLに変換
+            if "drive.google.com" in media_url and "/view" in media_url:
+                try:
+                    # 正しいファイルIDの抽出方法に修正 (URLの構造を考慮)
+                    parts = media_url.split('/')
+                    file_id = None
+                    for i, part in enumerate(parts):
+                        if part == 'd' and i + 1 < len(parts):
+                            file_id = parts[i+1]
+                            break
+                    
+                    if file_id:
+                        direct_download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+                        logger.info(f"Google Driveリンクを検出。直接ダウンロードURLに変換: {direct_download_url}")
+                        response = requests.get(direct_download_url, stream=True, timeout=30) # timeoutを追加
+                        response.raise_for_status()
+                        
+                        # Content-Type が HTML の場合は警告を出し、以降の処理で失敗する可能性を示唆
+                        # text/htmlを含む場合も考慮 (例: text/html; charset=utf-8)
+                        current_content_type = response.headers.get('content-type', '').lower()
+                        if 'text/html' in current_content_type:
+                            logger.warning(f"Google DriveからHTMLが返されました (Content-Type: {current_content_type})。直接ダウンロードに失敗した可能性があります。URL: {direct_download_url}")
+                            # HTMLが返された場合、後続のメディアタイプ判定やアップロードが失敗する可能性が高い
+                            # ここでは警告に留め、処理を続行するが、場合によってはreturn Noneが良い
+                    else:
+                        logger.warning(f"Google DriveのファイルID抽出に失敗しました: {media_url}")
+                        # ファイルIDが取れなければ元のresponseで続行
+
+                except requests.exceptions.RequestException as e_gdrive:
+                    logger.error(f"Google Drive直接ダウンロードURLからの取得に失敗: {e_gdrive}。元のURLで試行します。")
+                    # GDriveからのダウンロードに失敗した場合、元のmedia_urlで取得し直すか、
+                    # または元のresponseをそのまま使う。元のresponseは既にstream=Trueで取得済み。
+                    # ただし、上記のロジックでresponse変数が上書きされている可能性があるため、再度元のURLで取得する方が安全。
+                    try:
+                        logger.info(f"元のメディアURLで再取得試行: {media_url}")
+                        response = requests.get(media_url, stream=True, timeout=30)
+                        response.raise_for_status()
+                    except requests.exceptions.RequestException as e_original:
+                        logger.error(f"元のメディアURL {media_url} からの再取得も失敗: {e_original}")
+                        return None # 両方失敗したら諦める
+                except Exception as e_general:
+                    # その他の予期せぬエラー（IndexErrorなど）
+                    logger.error(f"Google Driveリンク処理中に予期せぬエラー: {e_general}。元のURLで試行します。")
+                    try:
+                        logger.info(f"元のメディアURLで再取得試行: {media_url}")
+                        response = requests.get(media_url, stream=True, timeout=30)
+                        response.raise_for_status()
+                    except requests.exceptions.RequestException as e_original_fallback:
+                        logger.error(f"元のメディアURL {media_url} からの再取得も失敗: {e_original_fallback}")
+                        return None
+            
+            # response.content を使用するため、stream=True の効果が薄れるが、
+            # BytesIOに渡すためには全コンテンツを読む必要がある。
+            # 大きなファイルを扱う場合は、一時ファイルに保存するアプローチの方がメモリ効率が良い。
+            # ここでは、まず BytesIO での動作を優先。
+            try:
+                media_content = response.content # 全コンテンツをメモリに読み込む
+            except Exception as e_content:
+                logger.error(f"レスポンスコンテンツの読み込みに失敗: {e_content}")
+                return None
+
             # ファイル名と拡張子を仮に決定 (Content-Typeからより正確に判定も可能)
             file_name = os.path.basename(media_url.split('?')[0]) # クエリパラメータを除外
             if '.' not in file_name: # 拡張子がない場合はデフォルトで.jpgを試す
@@ -120,7 +182,8 @@ class TwitterClient:
                 logger.debug(f"一時ファイル {file_name} を削除しました。")
             else:
                 # 画像やGIFの場合
-                uploaded_media = self.api_v1.media_upload(filename=file_name, file=response.raw, media_category=media_category)
+                media_data = io.BytesIO(media_content) # response.contentから作成
+                uploaded_media = self.api_v1.media_upload(filename=file_name, file=media_data, media_category=media_category)
 
             logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
             return uploaded_media.media_id_string
