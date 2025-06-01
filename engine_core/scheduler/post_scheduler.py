@@ -14,31 +14,26 @@ class ScheduledPost(TypedDict):
     worksheet_name: Optional[str] # どのワークシートから取得するかの情報も追加
 
 class PostScheduler:
-    def __init__(self, config: Config):
-        self.config = config
-        self.schedule_config = self.config.get_schedule_config()
-        if not self.schedule_config:
-            msg = "スケジューラ設定 (schedulerセクション) がconfig.ymlに見つかりません。"
-            logger.error(msg)
-            raise ValueError(msg)
+    def __init__(self,
+                 config: Config,
+                 start_hour: int,
+                 end_hour: int,
+                 min_interval_minutes: int,
+                 posts_per_account_schedule: Dict[str, int],
+                 schedule_file_path: str, # schedule_file_path を追加
+                 max_posts_per_hour_globally: Optional[int] = None): # オプション引数として追加
+        self.config = config # Config全体はアカウント情報取得などに必要なので保持
+        self.start_hour = start_hour
+        self.end_hour = end_hour
+        self.min_interval_minutes = min_interval_minutes
+        self.posts_per_account_schedule = posts_per_account_schedule
+        self.schedule_file_path = schedule_file_path # ファイルパスをインスタンス変数として保持
+        self.max_posts_per_hour_globally = max_posts_per_hour_globally
 
-        self.start_hour: int = self.schedule_config.get("start_hour", 9)
-        self.end_hour: int = self.schedule_config.get("end_hour", 21)
-        self.min_interval_minutes: int = self.schedule_config.get("min_interval_minutes", 30)
-        self.max_posts_per_hour_globally: Optional[int] = self.schedule_config.get("max_posts_per_hour_globally")
-        
-        # アカウントごとの1日の投稿数設定
-        self.posts_per_account_schedule: Dict[str, int] = self.config.get_posts_per_account_schedule() or {}
         if not self.posts_per_account_schedule:
-            logger.warning("アカウントごとの投稿数設定 (scheduler.posts_per_account) がありません。デフォルトのTwitterアカウント情報から試みます。")
-            # フォールバックとして、Twitterアカウント設定に posts_per_day があればそれを使う (なければ1)
-            twitter_accounts_config = self.config.get_twitter_accounts()
-            for acc_conf in twitter_accounts_config:
-                acc_id = acc_conf.get("account_id")
-                if acc_id and acc_id not in self.posts_per_account_schedule:
-                    self.posts_per_account_schedule[acc_id] = acc_conf.get("posts_per_day", 1) 
+            logger.warning("アカウントごとの投稿数設定が空です。")
         
-        logger.info(f"PostScheduler初期化完了: 開始={self.start_hour}時, 終了={self.end_hour}時, 最短間隔={self.min_interval_minutes}分")
+        logger.info(f"PostScheduler初期化完了: 開始={self.start_hour}時, 終了={self.end_hour}時, 最短間隔={self.min_interval_minutes}分, ScheduleFile={self.schedule_file_path}")
         logger.debug(f"アカウント毎の投稿数: {self.posts_per_account_schedule}")
 
     def _is_within_posting_hours(self, dt: datetime) -> bool:
@@ -62,7 +57,11 @@ class PostScheduler:
             if not account_config:
                 logger.warning(f"アカウントID '{acc_id}' の設定がtwitter_accountsセクションに見つかりません。スキップします。")
                 continue
-            worksheet = account_config.get("spreadsheet_worksheet")
+            google_sheets_source = account_config.get("google_sheets_source")
+            worksheet = None
+            if isinstance(google_sheets_source, dict):
+                worksheet = google_sheets_source.get("worksheet_name")
+
             if not worksheet:
                 logger.warning(f"アカウントID '{acc_id}' にspreadsheet_worksheetが設定されていません。スキップします。")
                 continue
@@ -152,7 +151,30 @@ if __name__ == '__main__':
         config_file_path = os.path.join(project_root, "config/config.yml")
         
         config_instance = Config(config_path=config_file_path)
-        scheduler = PostScheduler(config=config_instance)
+        
+        # PostScheduler の初期化を新しい __init__ に合わせて変更
+        schedule_conf = config_instance.get_schedule_config()
+        if not schedule_conf:
+            raise ValueError("config.ymlからschedule_settingsが見つかりません。")
+
+        posts_schedule = config_instance.get_posts_per_account_schedule()
+        if not posts_schedule:
+             posts_schedule = {} # テスト用に空辞書を許容 (実際はエラーかデフォルトが良い)
+             logger.warning("テスト用に posts_per_account_schedule が空ですが続行します。")
+
+
+        # schedule_file_path を config から取得 (テストなので通常のパスを使用)
+        schedule_file = schedule_conf.get("schedule_file", "logs/schedule.txt")
+
+        scheduler = PostScheduler(
+            config=config_instance,
+            start_hour=schedule_conf.get("start_hour", 9),
+            end_hour=schedule_conf.get("end_hour", 21),
+            min_interval_minutes=schedule_conf.get("min_interval_minutes", 30),
+            posts_per_account_schedule=posts_schedule,
+            schedule_file_path=schedule_file, # ここで渡す
+            max_posts_per_hour_globally=schedule_conf.get("max_posts_per_hour_globally")
+        )
 
         today = date.today()
         logger.info(f"{today.isoformat()} のスケジュールを生成します...")

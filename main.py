@@ -26,9 +26,14 @@ except ImportError as e: # 具体的なエラーも表示
 
 
 # ロガー設定 (workflow_manager.py から移動)
-logging.basicConfig(level=logging.INFO, # デフォルトはINFOレベル
+# デフォルトのログレベルを WARNING に変更
+logging.basicConfig(level=logging.WARNING,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__) # main.py 用のロガー
+
+# ライブラリのロガーレベルを調整
+logging.getLogger("urllib3").setLevel(logging.INFO)
+logging.getLogger("tweepy").setLevel(logging.INFO)
 
 def main():
     logger.info("システムメイン処理を開始します。")
@@ -40,21 +45,26 @@ def main():
     parser.add_argument("--force-regenerate", action="store_true", help="スケジュール生成時に既存ファイルを無視して強制再生成します。")
     parser.add_argument("--config", type=str, default="config/config.yml", help="設定ファイルのパス (デフォルト: config/config.yml)")
     parser.add_argument("--debug", action="store_true", help="デバッグログを有効にします。")
+    parser.add_argument("--info", action="store_true", help="INFOレベルのログを有効にします。")
+    parser.add_argument("--use-test-schedule", action="store_true", help="テスト用のスケジュールファイルと実行ログファイルを使用します。config.ymlに test_schedule_file と test_executed_file が定義されている必要があります。")
 
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         logger.info("デバッグログモードが有効になりました。")
+    elif args.info:
+        logging.getLogger().setLevel(logging.INFO)
+        logger.info("INFOログモードが有効になりました。")
 
 
     try:
         # config.yml のパスを解決
-        # main.py がプロジェクトルートにあると仮定
         config_file_path_main = args.config
         if not os.path.isabs(config_file_path_main):
             project_root = os.path.dirname(os.path.abspath(__file__))
             config_file_path_main = os.path.join(project_root, args.config)
+        logger.debug(f"使用する設定ファイル (絶対パス): {config_file_path_main}")
         
         if not os.path.exists(config_file_path_main):
             logger.critical(f"設定ファイルが見つかりません: {config_file_path_main}")
@@ -63,7 +73,52 @@ def main():
             exit(1)
 
         config_instance = Config(config_path=config_file_path_main)
-        workflow_manager = WorkflowManager(config=config_instance)
+        
+        # WorkflowManager に渡すファイルパスを決定
+        schedule_settings = config_instance.get_schedule_config()
+        if not schedule_settings:
+            raise ValueError("config.ymlに auto_post_bot.schedule_settings が見つかりません。")
+
+        logs_dir_from_config = config_instance.get_logs_directory() # Configから取得
+        logger.debug(f"configから読み込んだ common.logs_directory: '{logs_dir_from_config}'")
+        if not logs_dir_from_config:
+             logger.warning(f"config.yml の common.logs_directory が未設定のため、デフォルトの 'logs' を使用します。")
+             logs_dir_from_config = "logs" # デフォルト値
+        
+        if not os.path.isabs(logs_dir_from_config):
+             config_dir = os.path.dirname(config_file_path_main)
+             resolved_logs_dir = os.path.join(config_dir, '..', logs_dir_from_config)
+             logger.debug(f"相対パスのlogs_directoryを解決: config_dir='{config_dir}', resolved_logs_dir='{resolved_logs_dir}'")
+        else:
+            resolved_logs_dir = logs_dir_from_config
+            logger.debug(f"絶対パスのlogs_directoryを使用: '{resolved_logs_dir}'")
+
+        if args.use_test_schedule:
+            schedule_file = schedule_settings.get("test_schedule_file")
+            executed_file = schedule_settings.get("test_executed_file")
+            if not schedule_file or not executed_file:
+                logger.critical("テスト用スケジュールファイルまたは実行済みファイルがconfig.ymlのschedule_settingsに定義されていません。")
+                exit(1)
+            logger.info(f"テストモード: schedule_fileキー='{schedule_file}', executed_fileキー='{executed_file}' を使用します。")
+        else:
+            schedule_file = schedule_settings.get("schedule_file")
+            executed_file = schedule_settings.get("executed_file")
+            if not schedule_file or not executed_file:
+                logger.critical("通常用のスケジュールファイルまたは実行済みファイルがconfig.ymlのschedule_settingsに定義されていません。")
+                exit(1)
+            logger.debug(f"通常モード: schedule_fileキー='{schedule_file}', executed_fileキー='{executed_file}' を使用します。")
+
+        # ファイル名を logs_dir と結合してフルパスにする
+        final_schedule_file_path = os.path.join(resolved_logs_dir, schedule_file)
+        final_executed_file_path = os.path.join(resolved_logs_dir, executed_file)
+        logger.debug(f"最終的なスケジュールファイルパス: '{final_schedule_file_path}'")
+        logger.debug(f"最終的な実行済みファイルパス: '{final_executed_file_path}'")
+
+        workflow_manager = WorkflowManager(
+            config=config_instance,
+            schedule_file_path=final_schedule_file_path,
+            executed_file_path=final_executed_file_path
+        )
 
         target_d: date
         if args.date:

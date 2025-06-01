@@ -4,6 +4,8 @@ common:
   log_level: "INFO"
   file_paths:
     google_key_file: "gspread-key.json"
+  logs_directory: "logs" 
+
 
 # 自動投稿Bot設定
 auto_post_bot:
@@ -11,6 +13,14 @@ auto_post_bot:
   discord_notification:
     enabled: true
     webhook_url: "https://discord.com/api/webhooks/1378206571556765707/8_9FQToOU1qwc7xESSfJlizX9Xx-Ls1NxZQMF0Xht9wuTR9FozY9PihorKn0RromKqRp"
+  schedule_settings:
+    start_hour: 10
+    end_hour: 22
+    min_interval_minutes: 1
+    schedule_file: "logs/schedule.txt"
+    executed_file: "logs/executed.txt"
+    test_schedule_file: "test_schedule.txt"  # ← テスト用スケジュールファイル 
+    test_executed_file: "test_executed.txt" # ← テスト用実行済み記録ファイル 
 
   # 他の通知設定を無効化
   line_notify:
@@ -31,18 +41,10 @@ auto_post_bot:
 
   posting_settings:
     posts_per_account: 5  # 1日の投稿回数
-    max_posts_per_account: 5  # アカウントごとの最大投稿回数
-    max_post_count: 5  # 全体の最大投稿回数
-    min_interval_hours: 24
-    post_interval_seconds: 300  # 投稿間隔を5分（300秒）に延長
+    max_post_count: 100  # 全体の最大投稿回数
+    post_interval_seconds: 60  # 投稿間隔を5分（300秒）に延長
   
-  schedule_settings:
-    start_hour: 10
-    end_hour: 22
-    min_interval_minutes: 10
-    schedule_file: "logs/schedule.txt"
-    executed_file: "logs/executed.txt"
-  
+ 
   media_settings:
     download_timeout: 60
     error_message_max_length: 100
@@ -58,6 +60,7 @@ auto_post_bot:
       consumer_secret: "EtWUYJRfXw37ZQyVP5LwQog13xi2UV3FYRvSWmYx4OF5zhg22j"
       access_token: "1332761771279601672-QZXhMnpVtjEWecoLMM40QmPCENzY0x"
       access_token_secret: "ZySI4nVscSfMjdGGpcOyOYbvRGePF13OqvVVsJ9Bss3xX"
+      posts_today: 2
       google_sheets_source:
         enabled: true
         worksheet_name: "都内メンエス"
@@ -66,6 +69,7 @@ auto_post_bot:
       consumer_secret: "hYVBLgMLvi5FbGn8if6587M7yNVLN7uxG6U1yqezlaiN5s853S"
       access_token: "1790120446198689792-cTjrCAE1viby3LhpKl1wvnqj6JIM4W"
       access_token_secret: "blDTtMDxtTo1WgcR4AEtZ3cs8zq8aa0BXWRlv1luYCdfv"
+      posts_today: 4
       google_sheets_source:
         enabled: true
         worksheet_name: "都内セクキャバ"

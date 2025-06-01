@@ -6,6 +6,8 @@ import time
 from typing import Optional, Dict, Any, List # List を追加
 from datetime import datetime # datetime を追加
 import io # io を追加
+import tempfile # tempfile を追加
+import mimetypes # mimetypes を追加
 
 # このモジュールがengine_coreパッケージ内にあることを想定してConfigをインポート
 # ただし、TwitterClient自体はConfigに直接依存せず、キーは外部から渡される想定
@@ -75,11 +77,11 @@ class TwitterClient:
             logger.info(f"メディアURLからデータをダウンロード開始: {media_url}")
             response = requests.get(media_url, stream=True)
             response.raise_for_status() # HTTPエラーチェック
-            
+            original_media_url = media_url # 元のURLを保持
+
             # Google Driveの共有リンクを直接ダウンロード用URLに変換
             if "drive.google.com" in media_url and "/view" in media_url:
                 try:
-                    # 正しいファイルIDの抽出方法に修正 (URLの構造を考慮)
                     parts = media_url.split('/')
                     file_id = None
                     for i, part in enumerate(parts):
@@ -90,115 +92,133 @@ class TwitterClient:
                     if file_id:
                         direct_download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
                         logger.info(f"Google Driveリンクを検出。直接ダウンロードURLに変換: {direct_download_url}")
-                        response = requests.get(direct_download_url, stream=True, timeout=30) # timeoutを追加
+                        # stream=True を維持しつつ、新しいURLで再度リクエスト
+                        response = requests.get(direct_download_url, stream=True, timeout=30, allow_redirects=True)
                         response.raise_for_status()
-                        
-                        # Content-Type が HTML の場合は警告を出し、以降の処理で失敗する可能性を示唆
-                        # text/htmlを含む場合も考慮 (例: text/html; charset=utf-8)
                         current_content_type = response.headers.get('content-type', '').lower()
                         if 'text/html' in current_content_type:
-                            logger.warning(f"Google DriveからHTMLが返されました (Content-Type: {current_content_type})。直接ダウンロードに失敗した可能性があります。URL: {direct_download_url}")
-                            # HTMLが返された場合、後続のメディアタイプ判定やアップロードが失敗する可能性が高い
-                            # ここでは警告に留め、処理を続行するが、場合によってはreturn Noneが良い
+                            logger.warning(f"Google DriveからHTMLが返されました (Content-Type: {current_content_type})。URL: {direct_download_url}. 元のURLでの処理を試みます。")
+                            # HTMLが返された場合は元のURLで取得し直す
+                            response = requests.get(original_media_url, stream=True, timeout=30)
+                            response.raise_for_status()
                     else:
                         logger.warning(f"Google DriveのファイルID抽出に失敗しました: {media_url}")
-                        # ファイルIDが取れなければ元のresponseで続行
+                        # ファイルIDが取れなければ元のresponseで続行 (既に取得済み)
 
                 except requests.exceptions.RequestException as e_gdrive:
-                    logger.error(f"Google Drive直接ダウンロードURLからの取得に失敗: {e_gdrive}。元のURLで試行します。")
-                    # GDriveからのダウンロードに失敗した場合、元のmedia_urlで取得し直すか、
-                    # または元のresponseをそのまま使う。元のresponseは既にstream=Trueで取得済み。
-                    # ただし、上記のロジックでresponse変数が上書きされている可能性があるため、再度元のURLで取得する方が安全。
-                    try:
-                        logger.info(f"元のメディアURLで再取得試行: {media_url}")
-                        response = requests.get(media_url, stream=True, timeout=30)
-                        response.raise_for_status()
-                    except requests.exceptions.RequestException as e_original:
-                        logger.error(f"元のメディアURL {media_url} からの再取得も失敗: {e_original}")
-                        return None # 両方失敗したら諦める
+                    logger.error(f"Google Drive直接ダウンロードURLからの取得/処理に失敗: {e_gdrive}。元のURLで試行します。")
+                    response = requests.get(original_media_url, stream=True, timeout=30)
+                    response.raise_for_status()
                 except Exception as e_general:
-                    # その他の予期せぬエラー（IndexErrorなど）
                     logger.error(f"Google Driveリンク処理中に予期せぬエラー: {e_general}。元のURLで試行します。")
-                    try:
-                        logger.info(f"元のメディアURLで再取得試行: {media_url}")
-                        response = requests.get(media_url, stream=True, timeout=30)
-                        response.raise_for_status()
-                    except requests.exceptions.RequestException as e_original_fallback:
-                        logger.error(f"元のメディアURL {media_url} からの再取得も失敗: {e_original_fallback}")
-                        return None
+                    response = requests.get(original_media_url, stream=True, timeout=30)
+                    response.raise_for_status()
             
-            # response.content を使用するため、stream=True の効果が薄れるが、
-            # BytesIOに渡すためには全コンテンツを読む必要がある。
-            # 大きなファイルを扱う場合は、一時ファイルに保存するアプローチの方がメモリ効率が良い。
-            # ここでは、まず BytesIO での動作を優先。
             try:
                 media_content = response.content # 全コンテンツをメモリに読み込む
+                content_type = response.headers.get('content-type', '').lower()
+                logger.debug(f"取得したContent-Type: '{content_type}' (URL: {response.url})")
+
             except Exception as e_content:
                 logger.error(f"レスポンスコンテンツの読み込みに失敗: {e_content}")
                 return None
 
-            # ファイル名と拡張子を仮に決定 (Content-Typeからより正確に判定も可能)
-            file_name = os.path.basename(media_url.split('?')[0]) # クエリパラメータを除外
-            if '.' not in file_name: # 拡張子がない場合はデフォルトで.jpgを試す
-                file_name += ".jpg"
+            # ファイル拡張子を決定
+            # mimetypesを使ってContent-Typeから拡張子を推測
+            guessed_extension = mimetypes.guess_extension(content_type.split(';')[0])
+            base_file_name = os.path.basename(original_media_url.split('?')[0])
+            original_extension = os.path.splitext(base_file_name)[1].lower()
 
-            # Tweepyのメディアアップロード機能を利用
-            # videoの場合はmedia_category='tweet_video'が必要になることがある
-            # ここではシンプルに画像とGIFを想定
-            # チャンクアップロードが必要な大きなファイルには upload_chunked を使用
-
-            # Content-Typeに基づいてメディアカテゴリを推測
-            content_type = response.headers.get('content-type', '').lower()
+            # 適切な拡張子を選択 (mimetypesの結果を優先、なければ元のURLから)
+            file_extension = guessed_extension if guessed_extension else original_extension
+            if not file_extension: # それでもなければデフォルト
+                if 'video' in content_type:
+                    file_extension = '.mp4'
+                elif 'gif' in content_type:
+                    file_extension = '.gif'
+                else:
+                    file_extension = '.jpg' # デフォルト
+            
+            # 一時ファイル名のプレフィックス (拡張子なし)
+            file_name_prefix = os.path.splitext(base_file_name)[0] if '.' in base_file_name else base_file_name
+            
             media_category = None
             is_video = False
 
             if 'image/gif' in content_type:
                 media_category = 'tweet_gif'
-            elif 'image/' in content_type: # jpg, pngなど
+            elif 'image/' in content_type:
                 media_category = 'tweet_image'
-            elif 'video/mp4' in content_type: # 簡単な例としてMP4のみ対応
+            elif 'video/mp4' in content_type or (file_extension == '.mp4' and 'video' in content_type):
                 media_category = 'tweet_video'
                 is_video = True
-            else:
-                logger.warning(f"不明なContent-Type: {content_type}。メディアカテゴリを推測できません。アップロードを試みますが失敗する可能性があります。")
+            elif 'video/' in content_type: # mp4以外のvideoタイプも考慮
+                 media_category = 'tweet_video'
+                 is_video = True
+                 if not file_extension.startswith('.'):
+                     file_extension = '.' + content_type.split('/')[-1] # video/quicktime -> .quicktime
+                 if file_extension == '.mov': # .movはTwitterでサポートされない場合があるので注意喚起
+                     logger.warning("Content-Typeまたはファイル名が .mov (video/quicktime) です。Twitterでの互換性に注意してください。")
 
-            logger.info(f"メディアをTwitterにアップロード中 (ファイル名: {file_name}, カテゴリ: {media_category or '未指定'})...")
-            
-            # requestsのレスポンスから直接ファイルオブジェクトとして渡す
-            # Tweepyはファイルライクオブジェクトを受け付ける
-            if is_video:
-                 # 動画はチャンクアップロードが必要な場合が多い
-                 # Tweepy v4.x では media_upload はファイルパスを期待する。ファイルライクオブジェクトは非推奨。
-                 # 一時ファイルに保存してからパスを渡す方法が確実。
-                with open(file_name, 'wb') as f_temp:
-                    for chunk in response.raw.stream(decode_content=True):
-                        f_temp.write(chunk)
-                logger.debug(f"メディアを一時ファイル {file_name} に保存しました。")
+            elif 'application/octet-stream' in content_type or not content_type:
+                logger.warning(f"Content-Typeが '{content_type}' のため、ファイル拡張子 '{file_extension}' から推測します。")
+                if file_extension in ['.mp4', '.mov']:
+                    media_category = 'tweet_video'
+                    is_video = True
+                    if file_extension == '.mov': logger.warning("拡張子が .mov です。Twitterでの互換性に注意してください。")
+                elif file_extension in ['.jpg', '.jpeg', '.png']:
+                    media_category = 'tweet_image'
+                elif file_extension == '.gif':
+                    media_category = 'tweet_gif'
+                else:
+                    logger.warning(f"拡張子 '{file_extension}' からもメディアタイプを特定できませんでした。デフォルトで画像として扱います。")
+                    media_category = 'tweet_image'
+            else:
+                logger.warning(f"不明なContent-Type: {content_type}。ファイル拡張子 '{file_extension}' から推測し、デフォルトで画像として扱います。")
+                media_category = 'tweet_image' # デフォルト
+
+            logger.debug(f"判定後の media_category: '{media_category}', is_video: {is_video}, file_extension: {file_extension}")
+
+            temp_file = None
+            try:
+                # 一時ファイルを作成 (正しい拡張子を付ける)
+                # NamedTemporaryFileは接頭辞と接尾辞(拡張子)を指定できる
+                with tempfile.NamedTemporaryFile(delete=False, prefix=file_name_prefix + '_', suffix=file_extension) as temp_f:
+                    temp_f.write(media_content)
+                    temp_file_path = temp_f.name
                 
-                # チャンクアップロード (ファイルサイズによってはこちらが適切)
-                # Tweepyの upload_chunked はファイルパスを引数にとる
-                uploaded_media = self.api_v1.media_upload(filename=file_name, media_category=media_category, chunked=True)
-                os.remove(file_name) # 一時ファイルを削除
-                logger.debug(f"一時ファイル {file_name} を削除しました。")
-            else:
-                # 画像やGIFの場合
-                media_data = io.BytesIO(media_content) # response.contentから作成
-                uploaded_media = self.api_v1.media_upload(filename=file_name, file=media_data, media_category=media_category)
+                logger.info(f"メディアを一時ファイル {temp_file_path} に保存し、Twitterにアップロード中 (カテゴリ: {media_category or '未指定'}, メディアタイプ: {content_type})...")
 
-            logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
-            return uploaded_media.media_id_string
+                uploaded_media = self.api_v1.media_upload(
+                    filename=temp_file_path, 
+                    media_category=media_category,
+                    chunked=is_video # 動画の場合はチャンクアップロードを有効にする
+                )
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"メディアURLからのダウンロード失敗: {media_url}, Error: {e}", exc_info=True)
+                logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
+                return uploaded_media.media_id_string
+
+            except tweepy.TweepyException as e:
+                logger.error(f"Twitterへのメディアアップロード失敗: {e}", exc_info=True)
+                if isinstance(e, tweepy.errors.Forbidden):
+                    logger.error("Forbidden (403)エラー。APIキーの権限、アプリの承認状態、またはTwitterのルール違反を確認してください。")
+                return None
+            except Exception as e_upload:
+                logger.error(f"メディアアップロード処理中の予期せぬエラー: {e_upload}", exc_info=True)
+                return None
+            finally:
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.remove(temp_file_path)
+                        logger.debug(f"一時ファイル {temp_file_path} を削除しました。")
+                    except OSError as e_remove:
+                        logger.error(f"一時ファイル {temp_file_path} の削除に失敗: {e_remove}")
+
+        except requests.exceptions.RequestException as e_req:
+            logger.error(f"メディアURLからのダウンロードまたはGoogle Drive処理で失敗: {original_media_url}, Error: {e_req}", exc_info=True)
             return None
-        except tweepy.TweepyException as e:
-            logger.error(f"Twitterへのメディアアップロード失敗: {e}", exc_info=True)
-            # tweepy.errors.Forbidden の場合は403エラーで、キーの権限問題やAPIルールの可能性
-            if isinstance(e, tweepy.errors.Forbidden):
-                logger.error("Forbidden (403)エラー。APIキーの権限、アプリの承認状態、またはTwitterのルール違反を確認してください。")
-            return None
-        except Exception as e:
-            logger.error(f"メディアアップロード中の予期せぬエラー: {e}", exc_info=True)
+        except Exception as e_outer:
+            logger.error(f"メディア処理の全体的な予期せぬエラー: {e_outer}", exc_info=True)
             return None
 
     def post_tweet(self, text: str, media_ids: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:

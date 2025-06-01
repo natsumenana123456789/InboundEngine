@@ -1,5 +1,6 @@
 import requests
 import logging
+from datetime import datetime # datetimeクラスを直接インポート
 from typing import Optional, Dict, Any, List
 
 # このモジュールがengine_coreパッケージ内にあることを想定してConfigをインポート
@@ -62,7 +63,6 @@ class DiscordNotifier:
 
 if __name__ == '__main__':
     import os # if __name__ 内でのみ使用
-    from datetime import datetime # if __name__ 内でのみ使用
 
     logging.basicConfig(level=logging.DEBUG)
     logger.info("DiscordNotifierのテストを開始します。")

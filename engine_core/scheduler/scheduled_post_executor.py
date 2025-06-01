@@ -12,9 +12,14 @@ from .post_scheduler import ScheduledPost
 logger = logging.getLogger(__name__)
 
 class ScheduledPostExecutor:
-    def __init__(self, config: Config, spreadsheet_manager: SpreadsheetManager):
+    def __init__(self, 
+                 config: Config, 
+                 spreadsheet_manager: SpreadsheetManager,
+                 executed_file_path: str):
         self.config = config
         self.spreadsheet_manager = spreadsheet_manager
+        self.executed_file_path = executed_file_path
+        
         # DiscordNotifierは都度Webhook URLを指定して初期化するか、汎用的なものを保持
         # ここでは汎用的な通知先ID "default_notification" を使用する想定
         default_webhook_url = self.config.get_discord_webhook_url("default_notification")
@@ -180,10 +185,32 @@ if __name__ == '__main__':
         
         config_instance = Config(config_path=config_file_path)
         spreadsheet_mgr = SpreadsheetManager(config=config_instance)
-        executor = ScheduledPostExecutor(config=config_instance, spreadsheet_manager=spreadsheet_mgr)
+        
+        # テスト用の実行済みファイルパス (configから読むか、固定のテスト用パス)
+        test_executed_file = config_instance.get("auto_post_bot.schedule_settings.executed_file", "logs/executed_test.txt")
+        
+        executor = ScheduledPostExecutor(
+            config=config_instance, 
+            spreadsheet_manager=spreadsheet_mgr,
+            executed_file_path=test_executed_file
+        )
         
         # テスト用にPostSchedulerで1件スケジュールを生成してみる
-        planner = PostScheduler(config=config_instance)
+        schedule_conf = config_instance.get_schedule_config()
+        if not schedule_conf:
+            raise ValueError("config.ymlからschedule_settingsが見つかりません。")
+
+        posts_schedule_dict = config_instance.get_posts_per_account_schedule() or {}
+        # PostSchedulerの初期化に必要な引数を渡す
+        planner = PostScheduler(
+            config=config_instance,
+            start_hour=schedule_conf.get("start_hour", 9),
+            end_hour=schedule_conf.get("end_hour", 21),
+            min_interval_minutes=schedule_conf.get("min_interval_minutes", 30),
+            posts_per_account_schedule=posts_schedule_dict,
+            schedule_file_path=schedule_conf.get("schedule_file", "logs/schedule.txt"), # 通常のスケジュールファイルパス
+            max_posts_per_hour_globally=schedule_conf.get("max_posts_per_hour_globally")
+        )
         today_schedule = planner.generate_schedule_for_day(datetime.today().date())
         
         if not today_schedule:

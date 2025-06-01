@@ -12,24 +12,45 @@ from .scheduler.scheduled_post_executor import ScheduledPostExecutor
 
 logger = logging.getLogger(__name__)
 
-# デフォルトのログディレクトリとファイル名
-LOGS_DIR = "logs"
-SCHEDULE_FILE_NAME = "schedule.txt"
-EXECUTED_LOG_FILE_NAME = "executed.txt"
+# LOGS_DIR は config から取得するので、グローバル定数は不要になるか、デフォルトとしてのみ使用
+# SCHEDULE_FILE_NAME と EXECUTED_LOG_FILE_NAME も同様
 
 class WorkflowManager:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, schedule_file_path: str, executed_file_path: str):
         self.config = config
-        self.logs_dir = self.config.get("common.logs_directory", LOGS_DIR)
-        os.makedirs(self.logs_dir, exist_ok=True)
+        self.logs_dir = self.config.get("common.logs_directory", "logs") # デフォルト値を指定
+        os.makedirs(self.logs_dir, exist_ok=True) # logs_dirの存在確認と作成
 
-        self.schedule_file_path = os.path.join(self.logs_dir, SCHEDULE_FILE_NAME)
-        self.executed_log_file_path = os.path.join(self.logs_dir, EXECUTED_LOG_FILE_NAME)
+        # 引数で渡されたファイルパスを使用
+        self.schedule_file_path = schedule_file_path
+        self.executed_log_file_path = executed_file_path
 
         # コアコンポーネントの初期化
         self.spreadsheet_manager = SpreadsheetManager(config=self.config)
-        self.post_scheduler = PostScheduler(config=self.config)
-        self.post_executor = ScheduledPostExecutor(config=self.config, spreadsheet_manager=self.spreadsheet_manager)
+        
+        # PostScheduler と ScheduledPostExecutor の初期化に必要な情報をconfigから取得
+        schedule_settings = self.config.get_schedule_config()
+        if not schedule_settings:
+            msg = "スケジューラ設定 (auto_post_bot.schedule_settings) がconfig.ymlに見つかりません。"
+            logger.error(msg)
+            raise ValueError(msg)
+
+        posts_per_account = self.config.get_posts_per_account_schedule() or {}
+
+        self.post_scheduler = PostScheduler(
+            config=self.config,
+            start_hour=schedule_settings.get("start_hour", 9),
+            end_hour=schedule_settings.get("end_hour", 21),
+            min_interval_minutes=schedule_settings.get("min_interval_minutes", 30),
+            posts_per_account_schedule=posts_per_account,
+            schedule_file_path=self.schedule_file_path, # ここで渡す
+            max_posts_per_hour_globally=schedule_settings.get("max_posts_per_hour_globally")
+        )
+        self.post_executor = ScheduledPostExecutor(
+            config=self.config, 
+            spreadsheet_manager=self.spreadsheet_manager,
+            executed_file_path=self.executed_log_file_path # ここで渡す
+        )
         
         # 通知用Notifier (WorkflowManager自身の通知用)
         wf_notifier_webhook_url = self.config.get_discord_webhook_url("workflow_notifications") # config.ymlに専用IDを設定想定
@@ -196,29 +217,47 @@ class WorkflowManager:
                             if log_entry.get("success") and log_entry.get("scheduled_time", "").startswith(target_date.isoformat()):
                                 executed_today_keys.add((log_entry["account_id"], log_entry["scheduled_time"]))                                
                         except json.JSONDecodeError:
+                            logger.debug(f"実行ログの不正な行をスキップ: {line.strip()}") # DEBUGログ追加
                             continue # 不正な行はスキップ
             except Exception as e:
                 logger.error(f"実行ログファイルの読み込みエラー: {e}", exc_info=True)
         
-        logger.debug(f"本日 ({target_date.isoformat()}) 実行済みのタスクキー: {len(executed_today_keys)}件")
+        logger.debug(f"本日 ({target_date.isoformat()}) 実行済みのタスクキー: {len(executed_today_keys)}件 {executed_today_keys if executed_today_keys else ''}") # DEBUGログ追加
 
         due_posts_count = 0
         successful_posts_count = 0
 
-        for post_item in schedule:
-            scheduled_time_utc = post_item["scheduled_time"] # 保存時にUTCのはず
+        logger.debug(f"スケジュール処理開始: now_utc={now_utc.isoformat()}, look_back={look_back_minutes}min, look_forward={look_forward_minutes}min") # DEBUGログ追加
+        time_range_start = now_utc - timedelta(minutes=look_back_minutes)
+        time_range_end = now_utc + timedelta(minutes=look_forward_minutes)
+        logger.debug(f"実行対象時間範囲: {time_range_start.isoformat()} から {time_range_end.isoformat()} まで") # DEBUGログ追加
+
+        for i, post_item in enumerate(schedule):
+            logger.debug(f"スケジュール項目 {i+1}/{len(schedule)} を処理中: {post_item}") # DEBUGログ追加
+            scheduled_time_utc = post_item["scheduled_time"]
+            logger.debug(f"  - 元のscheduled_time: {scheduled_time_utc} (型: {type(scheduled_time_utc)})") # DEBUGログ追加
+            
+            if not isinstance(scheduled_time_utc, datetime):
+                logger.warning(f"  - scheduled_timeがdatetime型ではありません。スキップします。 Item: {post_item}")
+                continue
+
             # 念のため aware でなければ aware にする
             if scheduled_time_utc.tzinfo is None:
+                logger.debug(f"  - scheduled_timeにタイムゾーン情報がないためUTCを付与します。") # DEBUGログ追加
                 scheduled_time_utc = scheduled_time_utc.replace(tzinfo=timezone.utc)
+            
+            logger.debug(f"  - 処理用scheduled_time_utc: {scheduled_time_utc.isoformat()} (タイムゾーン: {scheduled_time_utc.tzinfo})") # DEBUGログ追加
 
             task_key = (post_item["account_id"], scheduled_time_utc.isoformat())
             if task_key in executed_today_keys:
-                # logger.debug(f"タスク {task_key} は既に実行済みのためスキップします。")
+                logger.debug(f"  - タスク {task_key} は既に実行済みのためスキップします。") # DEBUGログ追加
                 continue
 
             # 現在時刻から見て、実行対象期間内か？
-            # 予定時刻が (now - look_back) から (now + look_forward) の間
-            if (now_utc - timedelta(minutes=look_back_minutes)) <= scheduled_time_utc <= (now_utc + timedelta(minutes=look_forward_minutes)):
+            is_within_range = (time_range_start <= scheduled_time_utc <= time_range_end)
+            logger.debug(f"  - 実行期間判定: ({time_range_start.isoformat()} <= {scheduled_time_utc.isoformat()} <= {time_range_end.isoformat()}) = {is_within_range}") # DEBUGログ追加
+            
+            if is_within_range:
                 due_posts_count += 1
                 logger.info(f"実行対象タスク: {post_item['account_id']} @ {scheduled_time_utc.strftime('%H:%M:%S')}")
                 
