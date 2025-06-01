@@ -49,13 +49,16 @@ class PostScheduler:
         # 各アカウントの投稿数を集計するためのリスト
         post_tasks_for_accounts: List[Tuple[str, Optional[str]]] = [] # (account_id, worksheet_name)
 
-        twitter_accounts = self.config.get_twitter_accounts() # 設定から全Twitterアカウント情報を取得
+        # 有効なTwitterアカウント情報のみを取得するよう修正
+        active_twitter_accounts = self.config.get_active_twitter_accounts() 
 
         for acc_id, num_posts in self.posts_per_account_schedule.items():
+            # posts_per_account_schedule は Config 側で有効なアカウントのみで作られている前提
             # 対応するアカウント設定情報を見つける
-            account_config = next((acc for acc in twitter_accounts if acc.get("account_id") == acc_id), None)
-            if not account_config:
-                logger.warning(f"アカウントID '{acc_id}' の設定がtwitter_accountsセクションに見つかりません。スキップします。")
+            # active_twitter_accounts から検索することで、無効なアカウントを参照する可能性を排除
+            account_config = next((acc for acc in active_twitter_accounts if acc.get("account_id") == acc_id), None)
+            if not account_config: # 基本的には Config 側でフィルタされているので発生しづらいはず
+                logger.warning(f"有効なアカウントリストにID '{acc_id}' の設定が見つかりません。posts_per_account_scheduleとの不整合の可能性があります。スキップします。")
                 continue
             google_sheets_source = account_config.get("google_sheets_source")
             worksheet = None

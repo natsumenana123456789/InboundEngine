@@ -15,7 +15,7 @@ DEFAULT_WORKSHEET_NAME_IF_NOT_SPECIFIED = "Sheet1" # アカウントに紐づく
 
 def get_account_info_from_config(target_account_id: str = None):
     """config.yml からアカウントIDとそれに対応するワークシート名を取得する。
-    target_account_id が指定されていればそのアカウントを、なければ最初のアカウントを探す。
+    target_account_id が指定されていればそのアカウントを、なければ最初のアクティブなアカウントを探す。
     """
     if not os.path.exists(CONFIG_FILE_PATH):
         print(f"ERROR: 設定ファイルが見つかりません: {CONFIG_FILE_PATH}")
@@ -23,43 +23,54 @@ def get_account_info_from_config(target_account_id: str = None):
     
     try:
         config = Config(config_path=CONFIG_FILE_PATH)
-        twitter_accounts = config.get_twitter_accounts()
+        # get_active_twitter_accounts() を使うと、最初から有効なものだけが対象になるが、
+        # 個別に指定されたものが無効だった場合に「見つからない」ではなく「無効」と伝えたいので、
+        # まず全アカウントを取得し、enabledフラグをチェックする方針とする。
+        all_twitter_accounts = config.get_twitter_accounts() # enabledフラグが付与された全アカウント
 
-        if not twitter_accounts or not isinstance(twitter_accounts, list):
+        if not all_twitter_accounts or not isinstance(all_twitter_accounts, list):
             print(f"WARN: {CONFIG_FILE_PATH} に `twitter_accounts` のリストが見つからないか、形式が正しくありません。")
             return None, None
 
         if target_account_id:
             # 指定されたアカウントIDを探す
-            for acc in twitter_accounts:
+            account_found = False
+            for acc in all_twitter_accounts:
                 if isinstance(acc, dict) and acc.get("account_id") == target_account_id:
+                    account_found = True
+                    if not acc.get("enabled", True): # enabledがない場合はTrue扱いだが、Config側で付与済みのはず
+                        print(f"ERROR: 指定されたアカウントID '{target_account_id}' は config.yml で無効化 (enabled: false) されています。")
+                        return None, None
+                    
                     worksheet_name = acc.get("google_sheets_source", {}).get("worksheet_name")
                     if not worksheet_name:
                          print(f"WARN: アカウント '{target_account_id}' にワークシート名が設定されていません。デフォルト値 '{DEFAULT_WORKSHEET_NAME_IF_NOT_SPECIFIED}' を使用します。")
                          worksheet_name = DEFAULT_WORKSHEET_NAME_IF_NOT_SPECIFIED
                     print(f"INFO: 指定されたアカウント情報を使用: Account='{target_account_id}', Worksheet='{worksheet_name}'")
                     return target_account_id, worksheet_name
-            print(f"ERROR: 指定されたアカウントID '{target_account_id}' が config.yml に見つかりません。")
-            return None, None
+            if not account_found:
+                print(f"ERROR: 指定されたアカウントID '{target_account_id}' が config.yml に見つかりません。")
+            return None, None # 見つからないか、上記で既にreturn済み
         else:
-            # 指定がない場合は最初のアカウント
-            if twitter_accounts:
-                first_account = twitter_accounts[0]
-                if isinstance(first_account, dict):
-                    account_id = first_account.get("account_id")
-                    worksheet_name = first_account.get("google_sheets_source", {}).get("worksheet_name")
-                    
-                    if not account_id:
-                        print(f"ERROR: config.yml の最初のTwitterアカウントに account_id がありません。")
-                        return None, None
-                    if not worksheet_name:
-                        print(f"WARN: アカウント '{account_id}' にワークシート名が設定されていません。デフォルト値 '{DEFAULT_WORKSHEET_NAME_IF_NOT_SPECIFIED}' を使用します。")
-                        worksheet_name = DEFAULT_WORKSHEET_NAME_IF_NOT_SPECIFIED
-                    
-                    print(f"INFO: config.ymlの最初のアカウント情報を使用: Account='{account_id}', Worksheet='{worksheet_name}'")
-                    return account_id, worksheet_name
+            # 指定がない場合は最初のアクティブなアカウント
+            active_accounts = [acc for acc in all_twitter_accounts if acc.get("enabled", True)]
+            if active_accounts:
+                first_active_account = active_accounts[0]
+                # first_active_account は辞書であることは active_accounts の生成条件から期待できる
+                account_id = first_active_account.get("account_id")
+                worksheet_name = first_active_account.get("google_sheets_source", {}).get("worksheet_name")
+                
+                if not account_id: # 通常は起こらないはず
+                    print(f"ERROR: config.yml の最初のアクティブなTwitterアカウントに account_id がありません。")
+                    return None, None
+                if not worksheet_name:
+                    print(f"WARN: アカウント '{account_id}' にワークシート名が設定されていません。デフォルト値 '{DEFAULT_WORKSHEET_NAME_IF_NOT_SPECIFIED}' を使用します。")
+                    worksheet_name = DEFAULT_WORKSHEET_NAME_IF_NOT_SPECIFIED
+                
+                print(f"INFO: config.ymlの最初のアクティブなアカウント情報を使用: Account='{account_id}', Worksheet='{worksheet_name}'")
+                return account_id, worksheet_name
             
-            print(f"ERROR: config.yml に有効なTwitterアカウント設定が見つかりません。")
+            print(f"ERROR: config.yml に有効な (enabled: true) Twitterアカウント設定が見つかりません。")
             return None, None
 
     except Exception as e:

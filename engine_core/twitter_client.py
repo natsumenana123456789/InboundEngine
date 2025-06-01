@@ -278,7 +278,7 @@ class TwitterClient:
             temp_file_path = None # 元のダウンロードされた一時ファイル
             modified_temp_file_path = None # ffmpegで処理された後の一時ファイル
 
-            try:
+            try: # Inner try for file processing and upload (starts at original line 281)
                 # 一時ファイルを作成 (正しい拡張子を付ける)
                 with tempfile.NamedTemporaryFile(delete=False, prefix=file_name_prefix + '_', suffix=file_extension) as temp_f:
                     temp_f.write(media_content)
@@ -304,19 +304,19 @@ class TwitterClient:
                     media_category=media_category,
                     chunked=is_video # 動画の場合はチャンクアップロードを有効にする
                 )
-
                 logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
+                # Successfully uploaded, return media_id before finally block
                 return uploaded_media.media_id_string
 
-            except tweepy.TweepyException as e:
-                logger.error(f"Twitterへのメディアアップロード失敗: {e}", exc_info=True)
-                if isinstance(e, tweepy.errors.Forbidden):
-                    logger.error("Forbidden (403)エラー。APIキーの権限、アプリの承認状態、またはTwitterのルール違反を確認してください。")
-                return None
-            except Exception as e_upload:
+            except Exception as e_upload: # This except corresponds to the inner try (original L.281)
                 logger.error(f"メディアアップロード処理中の予期せぬエラー: {e_upload}", exc_info=True)
-                return None
-            finally:
+                # In case of upload error, we might still want to return None after cleanup
+                # but the primary return of media_id is on success within the try.
+                # For now, just log and let finally clean up. Fall through to outer error handling or return None.
+                # For clarity, if this specific block fails, it should lead to returning None from _upload_media_v1
+                pass # Error logged, will proceed to finally, then likely return None via outer excepts
+
+            finally: # This finally corresponds to the inner try (original L.281)
                 if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.remove(temp_file_path)
@@ -329,6 +329,18 @@ class TwitterClient:
                         logger.debug(f"ffmpeg処理後の一時ファイル {modified_temp_file_path} を削除しました。")
                     except OSError as e_remove_mod:
                         logger.error(f"ffmpeg処理後の一時ファイル {modified_temp_file_path} の削除に失敗: {e_remove_mod}")
+                # If an error occurred in the try block above, and we didn't return a media_id,
+                # _upload_media_v1 needs to return None.
+                # This will be caught by the outer try-except structure if an error was raised from inner 'except'
+                # or if we simply fall through.
+
+        except tweepy.TweepyException as e: # This is for Tweepy specific errors outside the inner file processing try-catch
+            logger.error(f"Twitterへのメディアアップロード失敗 (TweepyException): {e}", exc_info=True) # Clarified log
+            if isinstance(e, tweepy.errors.Forbidden):
+                logger.error("Forbidden (403)エラー。APIキーの権限、アプリの承認状態、またはTwitterのルール違反を確認してください。")
+            # No separate 'except Exception as e_upload:' here, as that was for the inner try.
+            # Any other TweepyException will just be logged and lead to returning None.
+            return None # Return None for any TweepyException here
 
         except requests.exceptions.RequestException as e_req:
             logger.error(f"メディアURLからのダウンロードまたはGoogle Drive処理で失敗: {original_media_url}, Error: {e_req}", exc_info=True)

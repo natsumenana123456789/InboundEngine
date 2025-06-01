@@ -91,17 +91,31 @@ class Config:
         return self.get("auto_post_bot.google_sheets_source.spreadsheet_id")
 
     def get_twitter_accounts(self) -> List[Dict[str, Any]]:
-        return self.get("auto_post_bot.twitter_accounts", [])
+        accounts_data = self.get("auto_post_bot.twitter_accounts", [])
+        processed_accounts = []
+        if isinstance(accounts_data, list):
+            for acc in accounts_data:
+                if isinstance(acc, dict):
+                    # enabled フラグがない場合はデフォルトで True (有効) とする
+                    if 'enabled' not in acc:
+                        acc['enabled'] = True
+                    processed_accounts.append(acc)
+        return processed_accounts
+
+    def get_active_twitter_accounts(self) -> List[Dict[str, Any]]:
+        """有効な（enabled: true）Twitterアカウントの設定リストを返す。"""
+        all_accounts = self.get_twitter_accounts()
+        return [acc for acc in all_accounts if acc.get("enabled", False)] # enabledがTrueのものだけ
 
     def get_active_twitter_account_details(self, account_id: str) -> Optional[Dict[str, Any]]:
-        accounts = self.get_twitter_accounts()
+        accounts = self.get_active_twitter_accounts() # 有効なアカウントのみを取得
         for acc in accounts:
             if acc.get("account_id") == account_id:
                 # worksheet_name をアカウント詳細に含める
                 if isinstance(acc.get("google_sheets_source"), dict):
                     acc["spreadsheet_worksheet"] = acc["google_sheets_source"].get("worksheet_name")
                 return acc
-        logger.warning(f"TwitterアカウントID '{account_id}' の設定が見つかりません。")
+        logger.warning(f"有効なTwitterアカウントID '{account_id}' の設定が見つからないか、無効化されています。")
         return None
 
     def get_discord_webhook_url(self, notification_id: str = "default_notification") -> Optional[str]:
@@ -115,18 +129,18 @@ class Config:
         return self.get("auto_post_bot.schedule_settings")
 
     def get_posts_per_account_schedule(self) -> Optional[Dict[str, int]]:
-        accounts = self.get_twitter_accounts()
+        accounts = self.get_active_twitter_accounts() # 有効なアカウントのみを取得
         if not accounts:
-            logger.warning("Twitterアカウント設定が見つからないため、投稿スケジュールを生成できません。")
+            logger.warning("有効なTwitterアカウント設定が見つからないため、投稿スケジュールを生成できません。")
             return None
 
         default_posts_per_account = self.get("auto_post_bot.posting_settings.posts_per_account")
         
         schedule: Dict[str, int] = {}
-        for account in accounts:
+        for account in accounts: # 有効なアカウントのみがループ対象
             account_id = account.get("account_id")
-            if not account_id:
-                logger.warning("アカウントIDがないTwitterアカウント設定が見つかりました。スキップします。")
+            if not account_id: # 基本的には active_accounts でフィルタされていれば発生しにくい
+                logger.warning("アカウントIDがない有効なTwitterアカウント設定が見つかりました。スキップします。")
                 continue
 
             posts_today = account.get("posts_today") # config.yml の各アカウントに posts_today: X を追加することを想定
