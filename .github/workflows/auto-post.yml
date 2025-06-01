@@ -1,14 +1,14 @@
 name: 🤖 Auto Post Workflow
 
-on:
-  schedule:
+#on:
+#  schedule:
     # 毎朝8時にスケジュール生成（JST）
-    - cron: '0 23 * * *'  # UTC 23:00 = JST 8:00
+#    - cron: '0 23 * * *'  # UTC 23:00 = JST 8:00
     # 30分ごとに投稿チェック（JST）
-    - cron: '*/30 * * * *'  # 毎時0分と30分に実行
-  push:
-    branches: [ main ]  # mainブランチへのプッシュ時
-  workflow_dispatch:  # 手動実行用
+#    - cron: '*/30 * * * *'  # 毎時0分と30分に実行
+#  push:
+#    branches: [ main ]  # mainブランチへのプッシュ時
+
 
 jobs:
   notify-update:
