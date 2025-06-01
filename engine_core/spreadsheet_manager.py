@@ -152,7 +152,7 @@ class SpreadsheetManager:
             # posted_at をJSTに変換
             jst = timezone(timedelta(hours=9))
             posted_at_jst = posted_at.astimezone(jst)
-
+            
             # 更新する値をリストで準備
             updates = [
                 gspread.Cell(row_index, posted_count_col_idx, str(new_posted_count)),

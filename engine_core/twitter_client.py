@@ -3,8 +3,8 @@ import logging
 import os
 import requests
 import time
-from typing import Optional, Dict, Any, List # List を追加
-from datetime import datetime # datetime を追加
+from typing import Optional, Dict, Any, List, Tuple # Tuple を追加
+from datetime import datetime, timezone # timezone を追加
 import io # io を追加
 import tempfile # tempfile を追加
 import mimetypes # mimetypes を追加
@@ -21,6 +21,13 @@ logger = logging.getLogger(__name__)
 MEDIA_ENDPOINT_URL_V1 = 'https://upload.twitter.com/1.1/media/upload.json'
 # Twitter API v2 (ツイート投稿用)
 # (tweepy.Clientが内部的にv2エンドポイントを使用する)
+
+class RateLimitError(Exception):
+    """レート制限エラーを示すカスタム例外"""
+    def __init__(self, message: str, reset_at_utc: Optional[datetime] = None, remaining_seconds: Optional[int] = None):
+        super().__init__(message)
+        self.reset_at_utc = reset_at_utc
+        self.remaining_seconds = remaining_seconds
 
 class TwitterClient:
     def __init__(self, consumer_key: str, consumer_secret: str,
@@ -46,7 +53,7 @@ class TwitterClient:
                 consumer_secret=self.consumer_secret,
                 access_token=self.access_token,
                 access_token_secret=self.access_token_secret,
-                wait_on_rate_limit=True
+                wait_on_rate_limit=False # Falseに変更
             )
             logger.info("Twitter API v2 クライアントの初期化に成功しました。")
         except Exception as e:
@@ -62,12 +69,47 @@ class TwitterClient:
                 access_token=self.access_token,
                 access_token_secret=self.access_token_secret
             )
-            self.api_v1 = tweepy.API(auth_v1, wait_on_rate_limit=True)
+            self.api_v1 = tweepy.API(auth_v1, wait_on_rate_limit=False) # Falseに変更
             logger.info("Twitter API v1.1 ハンドラの初期化に成功しました。")
         except Exception as e:
             logger.error(f"Twitter API v1.1 ハンドラの初期化に失敗: {e}", exc_info=True)
             # v1.1の認証が失敗するとメディアアップロードができないので、これは致命的
             raise ValueError(f"Twitter API v1.1 auth failed: {e}")
+
+    def _get_rate_limit_info_from_exception(self, e: tweepy.errors.TweepyException) -> Dict[str, Any]:
+        """Tweepyの例外からレート制限関連情報を抽出するヘルパー"""
+        rate_limit_info = {"error_type": type(e).__name__, "message": str(e)}
+        reset_dt_utc_val = None
+        remaining_sec_val = None
+
+        if hasattr(e, 'response') and e.response is not None and hasattr(e.response, 'headers'):
+            headers = e.response.headers
+            # rate_limit_info['headers'] = dict(headers) # デバッグ用に全ヘッダはログレベルDEBUGで出すなど検討
+            
+            limit = headers.get('x-rate-limit-limit')
+            remaining_api_calls = headers.get('x-rate-limit-remaining') # 名前変更 remaining -> remaining_api_calls
+            reset_unix = headers.get('x-rate-limit-reset')
+            
+            if limit: rate_limit_info['limit_max'] = limit
+            if remaining_api_calls: rate_limit_info['limit_remaining_calls'] = remaining_api_calls
+            if reset_unix:
+                try:
+                    reset_dt_utc_val = datetime.fromtimestamp(int(reset_unix), tz=timezone.utc)
+                    rate_limit_info['limit_reset_at_utc'] = reset_dt_utc_val.isoformat()
+                    
+                    now_utc = datetime.now(timezone.utc)
+                    remaining_sec_val = max(0, int((reset_dt_utc_val - now_utc).total_seconds()))
+                    rate_limit_info['limit_reset_in_seconds'] = remaining_sec_val
+                except ValueError:
+                    logger.warning(f"x-rate-limit-resetヘッダーの値 ({reset_unix}) のパースに失敗しました。")
+                    rate_limit_info['limit_reset_at_unix'] = reset_unix
+        else:
+            logger.warning(f"例外 {type(e).__name__} に response または headers 属性がありません。詳細なレート制限情報は取得できません。")
+        
+        # RateLimitErrorに渡す直前の情報をログ出力
+        logger.info(f"RateLimitError生成情報: reset_at_utc={reset_dt_utc_val}, remaining_seconds={remaining_sec_val}, raw_info={rate_limit_info}")
+
+        return {"raw_info": rate_limit_info, "reset_at_utc": reset_dt_utc_val, "remaining_seconds": remaining_sec_val}
 
     def _modify_video_metadata_ffmpeg(self, input_path: str) -> Optional[str]:
         """ffmpegを使用して動画のコメントメタデータを変更し、新しい一時ファイルのパスを返す。"""
@@ -321,12 +363,16 @@ class TwitterClient:
 
         except tweepy.TweepyException as e:
             logger.error(f"ツイート投稿失敗: {e}", exc_info=True)
-            # tweepy.errors.Forbidden の場合は401/403エラーで、認証や権限問題の可能性
-            if isinstance(e, tweepy.errors.Forbidden):
+            if isinstance(e, tweepy.errors.TooManyRequests):
+                rate_limit_details = self._get_rate_limit_info_from_exception(e)
+                reset_at = rate_limit_details.get("reset_at_utc")
+                remaining_sec = rate_limit_details.get("remaining_seconds")
+                # ログメッセージは _get_rate_limit_info_from_exception 内で出力されるのでここでは不要
+                raise RateLimitError(message=str(e), reset_at_utc=reset_at, remaining_seconds=remaining_sec)
+            elif isinstance(e, tweepy.errors.Forbidden):
                 logger.error("Forbidden (401/403)エラー。APIキー、アクセストークンの有効性、権限、またはTwitterのルール違反を確認してください。")
-            elif isinstance(e, tweepy.errors.TooManyRequests): # 429 Rate Limit
-                 logger.error("レート制限超過 (429)。しばらく待ってから再試行してください。")
-            # 他のTweepyExceptionもここでキャッチされる
+            
+            # 上記以外のTweepyExceptionや、Forbiddenの場合も（当面は）Noneを返す
             return None
         except Exception as e:
             logger.error(f"ツイート投稿中の予期せぬエラー: {e}", exc_info=True)

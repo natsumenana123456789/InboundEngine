@@ -45,7 +45,7 @@ auto_post_bot:
     max_post_count: 100  # 全体の最大投稿回数
     post_interval_seconds: 60  # 投稿間隔を5分（300秒）に延長
   
- 
+  
   media_settings:
     download_timeout: 60
     error_message_max_length: 100

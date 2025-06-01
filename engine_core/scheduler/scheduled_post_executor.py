@@ -1,12 +1,12 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, Tuple
 import random # random をインポート
 
 # 親パッケージのモジュールをインポート
 from ..config import Config
 from ..spreadsheet_manager import SpreadsheetManager
-from ..twitter_client import TwitterClient
+from ..twitter_client import TwitterClient, RateLimitError # RateLimitError をインポート
 from ..discord_notifier import DiscordNotifier
 from .post_scheduler import ScheduledPost
 # from ..utils.rate_limiter import RateLimiter # コメントアウト
@@ -35,37 +35,57 @@ class ScheduledPostExecutor:
         # self.rate_limiter = RateLimiter(calls=5, period=60) # コメントアウト
 
     def _insert_random_spaces(self, text: str, num_spaces_to_insert: int = 3) -> str:
-        """テキストのランダムな位置に指定された数の半角スペースを挿入する。"""
-        if not text or len(text) < 10: # 短すぎるテキストは処理しない
+        """テキスト中の指定された句読点・記号の後に、最大指定個数まで、50%の確率で半角スペースを挿入する。"""
+        if not text or num_spaces_to_insert <= 0:
             return text
 
-        n = len(text)
-        # 挿入可能な位置は、文字列の最初と最後を除く (0とn-1の間、つまり1からn-1)
-        # num_spaces_to_insert が多すぎる場合は、挿入可能な位置の数に制限する
-        max_possible_insertions = n -1 
-        actual_num_spaces = min(num_spaces_to_insert, max_possible_insertions)
+        target_chars = ['、', '。', '！', '？']
+        candidate_indices = [] # スペースを挿入する可能性のある文字の「後」のインデックスを格納
+
+        for i, char in enumerate(text):
+            if char in target_chars:
+                # 記号の直後 (i+1) を候補とする
+                # ただし、文字列の末尾や、既にスペースが連続している場合は避けるなどの考慮も可能だが、まずはシンプルに
+                if i + 1 < len(text): # 文字列の末尾でないことを確認
+                    candidate_indices.append(i + 1)
         
-        if actual_num_spaces <= 0:
+        if not candidate_indices:
             return text
 
-        # 挿入位置をランダムに選択 (重複なし)
-        # Pythonの文字列はイミュータブルなので、リストに変換して処理
+        # 実際にスペースを挿入するインデックスを選定
+        num_actual_candidates = min(len(candidate_indices), num_spaces_to_insert)
+        
+        # 候補箇所からランダムに選ぶ (重複なし)
+        # candidate_indices が num_actual_candidates より少ない場合は全て選ばれる
+        chosen_candidate_indices = random.sample(candidate_indices, num_actual_candidates)
+
+        # 挿入対象のインデックスを保存 (後でまとめて処理するため)
+        # 50%の確率で挿入を実行
+        indices_to_insert_space = []
+        for index in chosen_candidate_indices:
+            if random.random() < 0.5: # 50%の確率
+                indices_to_insert_space.append(index)
+
+        if not indices_to_insert_space:
+            return text
+
+        # テキストをリストに変換して挿入処理
         text_list = list(text)
         
-        # 挿入位置の候補 (文字列の最初と最後は避けるため、1からn-1の範囲)
-        possible_indices = list(range(1, n)) 
+        # 後ろから挿入することで、前の挿入によるインデックスのズレを防ぐ
+        indices_to_insert_space.sort(reverse=True)
         
-        # 実際に挿入する位置を選択 (重複なし)
-        # k が母集団より大きい場合はエラーになるため、minで調整
-        chosen_indices = random.sample(possible_indices, min(actual_num_spaces, len(possible_indices)))
-        
-        # 選択されたインデックスを降順にソートして、後ろから挿入する
-        # これにより、前の挿入によってインデックスがずれるのを防ぐ
-        chosen_indices.sort(reverse=True)
-        
-        for index in chosen_indices:
-            text_list.insert(index, ' ')
-            
+        for index in indices_to_insert_space:
+            # 既にスペースがある場合は挿入しない (簡易的な重複防止)
+            # ただし、このロジックだと連続スペースを完全に防ぐわけではない
+            # より厳密には、挿入前に text_list[index-1] がスペースでないかなどを確認
+            if index == 0 or text_list[index -1] != ' ': # 先頭でない、かつ前の文字がスペースでない
+                 if index < len(text_list) and text_list[index] != ' ': # 現在地がスペースでない
+                    text_list.insert(index, ' ')
+                 elif index == len(text_list): # 末尾への挿入の場合
+                    text_list.append(' ')
+
+
         return "".join(text_list)
 
     def execute_post(self, scheduled_post: ScheduledPost) -> Optional[str]:
@@ -143,9 +163,31 @@ class ScheduledPostExecutor:
                 posted_tweet_data = twitter_client.post_with_media_url(text=text_content, media_url=media_url)
             else:
                 posted_tweet_data = twitter_client.post_tweet(text=text_content)
-        except Exception as e: # post_with_media_url内でエラーはキャッチ・ログされるが、念のため
+        
+        except RateLimitError as rle:
+            logger.error(f"アカウント '{account_id}' (記事ID: {article_id}) のツイート投稿中にレート制限エラー: {str(rle)}")
+            
+            reason = "Twitter APIレート制限が発生しました (HTTP 429)。"
+            
+            # JSTタイムゾーンの定義
+            jst = timezone(timedelta(hours=9), name='JST')
+
+            if rle.remaining_seconds is not None:
+                reason += f" リセットまで約 {rle.remaining_seconds} 秒"
+                if rle.reset_at_utc:
+                    # UTC時刻をJSTに変換して表示
+                    reset_at_jst = rle.reset_at_utc.astimezone(jst)
+                    reason += f" (予定時刻: {reset_at_jst.strftime('%Y-%m-%d %H:%M:%S')} JST)"
+            elif rle.reset_at_utc: # 秒数が取れなかったがリセット時刻はある場合
+                reset_at_jst = rle.reset_at_utc.astimezone(jst)
+                reason += f" リセット予定時刻: {reset_at_jst.strftime('%Y-%m-%d %H:%M:%S')} JST"
+            
+            self._notify_failure(account_id, worksheet_name, reason, scheduled_time, article_id, text_content)
+            return None # レート制限時は失敗としてNoneを返す
+
+        except Exception as e: # RateLimitError以外の予期せぬエラー
             logger.error(f"アカウント '{account_id}' (記事ID: {article_id}) のツイート投稿中に予期せぬ最上位エラー: {e}", exc_info=True)
-            self._notify_failure(account_id, worksheet_name, f"ツイート投稿エラー: {e}", scheduled_time, article_id, text_content)
+            self._notify_failure(account_id, worksheet_name, f"ツイート投稿中の予期せぬエラー: {e}", scheduled_time, article_id, text_content)
             return None
 
         if not posted_tweet_data or not posted_tweet_data.get("id"):

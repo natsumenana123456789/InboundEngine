@@ -308,7 +308,7 @@ class WorkflowManager:
                 title=f"⚙️ 定時投稿処理完了 ({target_date.isoformat()})",
                 description=f"{due_posts_count}件の投稿を処理し、{successful_posts_count}件が成功しました。詳細はログを確認してください。",
                 color=0x0000ff if successful_posts_count == due_posts_count else (0xffa500 if successful_posts_count > 0 else 0xff0000)
-            ) 
+            )
 
     def process_scheduled_posts_for_day(self, date_str: str, process_now: bool = False) -> Tuple[int, int]:
         logger.info(f"{date_str} のスケジュール投稿処理を{( '現在時刻ベースで' if process_now else '予定時刻通りに' )}開始します。")

@@ -35,7 +35,15 @@ class DiscordNotifier:
             payload['username'] = username # ボットの表示名を一時的に変更
         
         try:
-            logger.info(f"Discord通知送信開始: Webhook={self.webhook_url[:30]}..., Content='{str(message)[:30]}...', Embeds?={'Yes' if embeds else 'No'}")
+            log_message_parts = [
+                f"Discord通知送信開始: Webhook={self.webhook_url[:30]}...",
+                f"Content='{str(message)[:30]}...'",
+                f"Embeds?={'Yes' if embeds else 'No'}"
+            ]
+            if embeds and isinstance(embeds, list) and len(embeds) > 0 and isinstance(embeds[0], dict) and 'description' in embeds[0]:
+                log_message_parts.append(f", FirstEmbedDesc='{str(embeds[0]['description'])[:50]}...'" )
+            logger.info(" ".join(log_message_parts))
+
             response = requests.post(self.webhook_url, json=payload)
             response.raise_for_status()  # 2xx 以外のステータスコードで例外を発生
             logger.info(f"Discord通知成功。ステータスコード: {response.status_code}")
