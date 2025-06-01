@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Tuple
+import random # random をインポート
 
 # 親パッケージのモジュールをインポート
 from ..config import Config
@@ -8,6 +9,7 @@ from ..spreadsheet_manager import SpreadsheetManager
 from ..twitter_client import TwitterClient
 from ..discord_notifier import DiscordNotifier
 from .post_scheduler import ScheduledPost
+# from ..utils.rate_limiter import RateLimiter # コメントアウト
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,42 @@ class ScheduledPostExecutor:
         else:
             self.default_notifier = None
             logger.warning("デフォルトのDiscord Webhook URLが設定されていません。通知は送信されません。")
+
+        # self.rate_limiter = RateLimiter(calls=5, period=60) # コメントアウト
+
+    def _insert_random_spaces(self, text: str, num_spaces_to_insert: int = 3) -> str:
+        """テキストのランダムな位置に指定された数の半角スペースを挿入する。"""
+        if not text or len(text) < 10: # 短すぎるテキストは処理しない
+            return text
+
+        n = len(text)
+        # 挿入可能な位置は、文字列の最初と最後を除く (0とn-1の間、つまり1からn-1)
+        # num_spaces_to_insert が多すぎる場合は、挿入可能な位置の数に制限する
+        max_possible_insertions = n -1 
+        actual_num_spaces = min(num_spaces_to_insert, max_possible_insertions)
+        
+        if actual_num_spaces <= 0:
+            return text
+
+        # 挿入位置をランダムに選択 (重複なし)
+        # Pythonの文字列はイミュータブルなので、リストに変換して処理
+        text_list = list(text)
+        
+        # 挿入位置の候補 (文字列の最初と最後は避けるため、1からn-1の範囲)
+        possible_indices = list(range(1, n)) 
+        
+        # 実際に挿入する位置を選択 (重複なし)
+        # k が母集団より大きい場合はエラーになるため、minで調整
+        chosen_indices = random.sample(possible_indices, min(actual_num_spaces, len(possible_indices)))
+        
+        # 選択されたインデックスを降順にソートして、後ろから挿入する
+        # これにより、前の挿入によってインデックスがずれるのを防ぐ
+        chosen_indices.sort(reverse=True)
+        
+        for index in chosen_indices:
+            text_list.insert(index, ' ')
+            
+        return "".join(text_list)
 
     def execute_post(self, scheduled_post: ScheduledPost) -> Optional[str]:
         """
@@ -69,6 +107,13 @@ class ScheduledPostExecutor:
             # 本文が空の場合でも、その情報を通知に含めるため text_content はそのまま渡す
             self._notify_failure(account_id, worksheet_name, f"記事ID '{article_id}' の本文が空", scheduled_time, article_id, text_content)
             return None
+
+        # === ランダムスペース挿入処理 ===
+        original_text_length = len(text_content)
+        text_content = self._insert_random_spaces(text_content)
+        if len(text_content) > original_text_length:
+            logger.info(f"アカウント '{account_id}' (記事ID: {article_id}) の本文にランダムスペースを挿入しました。 (変更後文字数: {len(text_content)})")
+        # === ランダムスペース挿入処理 完了 ===
 
         # 2. TwitterClientを初期化
         account_details = self.config.get_active_twitter_account_details(account_id)

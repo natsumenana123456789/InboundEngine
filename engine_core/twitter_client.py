@@ -8,6 +8,8 @@ from datetime import datetime # datetime を追加
 import io # io を追加
 import tempfile # tempfile を追加
 import mimetypes # mimetypes を追加
+import subprocess # subprocess を追加
+import uuid # uuid を追加
 
 # このモジュールがengine_coreパッケージ内にあることを想定してConfigをインポート
 # ただし、TwitterClient自体はConfigに直接依存せず、キーは外部から渡される想定
@@ -66,6 +68,58 @@ class TwitterClient:
             logger.error(f"Twitter API v1.1 ハンドラの初期化に失敗: {e}", exc_info=True)
             # v1.1の認証が失敗するとメディアアップロードができないので、これは致命的
             raise ValueError(f"Twitter API v1.1 auth failed: {e}")
+
+    def _modify_video_metadata_ffmpeg(self, input_path: str) -> Optional[str]:
+        """ffmpegを使用して動画のコメントメタデータを変更し、新しい一時ファイルのパスを返す。"""
+        output_temp_file = None
+        try:
+            # 出力用の一時ファイル名を生成 (入力と同じ拡張子を維持)
+            input_dir = os.path.dirname(input_path)
+            input_filename = os.path.basename(input_path)
+            input_name_part, input_ext_part = os.path.splitext(input_filename)
+            
+            # 新しい一時ファイルを作成 (NamedTemporaryFileだとffmpegが書き込めないことがあるので、単純なパスを生成)
+            # ffmpegは出力ファイルを自分で作成するので、存在しないパスを指定する
+            output_filename = f"{input_name_part}_meta_modified_{uuid.uuid4().hex[:8]}{input_ext_part}"
+            output_path = os.path.join(tempfile.gettempdir(), output_filename) # システムの一時ディレクトリに作成
+
+            # ffmpegコマンドの準備
+            # コメントにランダムな値を設定
+            random_comment = f"mod_{uuid.uuid4().hex[:12]}_{int(time.time())}"
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-i', input_path,
+                '-c', 'copy',         # ビデオとオーディオストリームを再エンコードせずにコピー
+                '-metadata', f'comment={random_comment}',
+                '-y',                 # 出力ファイルを無条件に上書き
+                output_path
+            ]
+            
+            logger.info(f"ffmpegでメタデータ変更開始: {input_path} -> {output_path} (comment: {random_comment})")
+            # ffmpegの実行 (標準出力・エラーは抑制し、エラー時のみログに出す)
+            process = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, check=False)
+            
+            if process.returncode == 0:
+                logger.info(f"ffmpegによるメタデータ変更成功: {output_path}")
+                return output_path
+            else:
+                logger.error(f"ffmpegの実行に失敗 (code: {process.returncode}): {input_path}")
+                logger.error(f"ffmpeg stdout: {process.stdout}")
+                logger.error(f"ffmpeg stderr: {process.stderr}")
+                # 失敗した場合は生成された可能性のある出力ファイルを削除
+                if os.path.exists(output_path):
+                    try:
+                        os.remove(output_path)
+                    except OSError as e_rem_out:
+                        logger.warning(f"ffmpeg失敗後の出力一時ファイル削除エラー: {output_path}, {e_rem_out}")
+                return None
+
+        except Exception as e:
+            logger.error(f"ffmpeg処理中に予期せぬエラー: {e}", exc_info=True)
+            if output_path and os.path.exists(output_path):
+                 try: os.remove(output_path) 
+                 except: pass # エラー時は握りつぶす
+            return None
 
     def _upload_media_v1(self, media_url: str) -> Optional[str]:
         """指定されたURLのメディアをTwitterにアップロードし、メディアIDを返す (v1.1 API)。"""
@@ -179,18 +233,32 @@ class TwitterClient:
 
             logger.debug(f"判定後の media_category: '{media_category}', is_video: {is_video}, file_extension: {file_extension}")
 
-            temp_file = None
+            temp_file_path = None # 元のダウンロードされた一時ファイル
+            modified_temp_file_path = None # ffmpegで処理された後の一時ファイル
+
             try:
                 # 一時ファイルを作成 (正しい拡張子を付ける)
-                # NamedTemporaryFileは接頭辞と接尾辞(拡張子)を指定できる
                 with tempfile.NamedTemporaryFile(delete=False, prefix=file_name_prefix + '_', suffix=file_extension) as temp_f:
                     temp_f.write(media_content)
                     temp_file_path = temp_f.name
                 
-                logger.info(f"メディアを一時ファイル {temp_file_path} に保存し、Twitterにアップロード中 (カテゴリ: {media_category or '未指定'}, メディアタイプ: {content_type})...")
+                upload_target_path = temp_file_path # アップロード対象のパス（デフォルトは元のファイル）
+
+                # 動画の場合、ffmpegでメタデータを変更する
+                if is_video and temp_file_path:
+                    logger.info(f"動画ファイル ({temp_file_path}) のメタデータ変更を試みます...")
+                    modified_temp_file_path = self._modify_video_metadata_ffmpeg(temp_file_path)
+                    if modified_temp_file_path:
+                        logger.info(f"メタデータ変更成功。アップロードには変更後ファイルを使用: {modified_temp_file_path}")
+                        upload_target_path = modified_temp_file_path
+                    else:
+                        logger.warning(f"動画メタデータの変更に失敗。元のファイルでアップロードを続行します: {temp_file_path}")
+                        # modified_temp_file_path は None のまま
+                
+                logger.info(f"メディアを一時ファイル {upload_target_path} に保存し、Twitterにアップロード中 (カテゴリ: {media_category or '未指定'}, メディアタイプ: {content_type})...")
 
                 uploaded_media = self.api_v1.media_upload(
-                    filename=temp_file_path, 
+                    filename=upload_target_path, 
                     media_category=media_category,
                     chunked=is_video # 動画の場合はチャンクアップロードを有効にする
                 )
@@ -213,6 +281,12 @@ class TwitterClient:
                         logger.debug(f"一時ファイル {temp_file_path} を削除しました。")
                     except OSError as e_remove:
                         logger.error(f"一時ファイル {temp_file_path} の削除に失敗: {e_remove}")
+                if modified_temp_file_path and os.path.exists(modified_temp_file_path):
+                    try:
+                        os.remove(modified_temp_file_path)
+                        logger.debug(f"ffmpeg処理後の一時ファイル {modified_temp_file_path} を削除しました。")
+                    except OSError as e_remove_mod:
+                        logger.error(f"ffmpeg処理後の一時ファイル {modified_temp_file_path} の削除に失敗: {e_remove_mod}")
 
         except requests.exceptions.RequestException as e_req:
             logger.error(f"メディアURLからのダウンロードまたはGoogle Drive処理で失敗: {original_media_url}, Error: {e_req}", exc_info=True)
