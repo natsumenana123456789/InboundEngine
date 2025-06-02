@@ -47,11 +47,11 @@ jobs:
         echo "${delimiter}" >> $GITHUB_ENV
         echo "APP_CONFIG_JSON environment variable has been set from secrets.APP_CONFIG_JSON."
 
-    - name: Run Auto Post Bot - Daily Schedule Workflow
-      run: python main.py --workflow daily_schedule
+    - name: Generate daily schedule
+      run: python main.py --generate-schedule
 
-    - name: Run Auto Post Bot - Execute Scheduled Posts Workflow
-      run: python main.py --workflow execute_scheduled_posts
+    - name: Execute scheduled posts
+      run: python main.py --process-now
 
     - name: Discord Notification on Failure
       if: failure()
