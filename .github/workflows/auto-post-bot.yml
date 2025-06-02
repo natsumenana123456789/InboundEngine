@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - develop
   schedule:
     # 毎日日本時間9時に実行 (UTCで0時)
     - cron: '0 0 * * *'
