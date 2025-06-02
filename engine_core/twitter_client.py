@@ -293,7 +293,7 @@ class TwitterClient:
                     if modified_temp_file_path:
                         logger.info(f"メタデータ変更成功。アップロードには変更後ファイルを使用: {modified_temp_file_path}")
                         upload_target_path = modified_temp_file_path
-                    else:
+            else:
                         logger.warning(f"動画メタデータの変更に失敗。元のファイルでアップロードを続行します: {temp_file_path}")
                         # modified_temp_file_path は None のまま
                 
@@ -304,9 +304,9 @@ class TwitterClient:
                     media_category=media_category,
                     chunked=is_video # 動画の場合はチャンクアップロードを有効にする
                 )
-                logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
+            logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
                 # Successfully uploaded, return media_id before finally block
-                return uploaded_media.media_id_string
+            return uploaded_media.media_id_string
 
             except Exception as e_upload: # This except corresponds to the inner try (original L.281)
                 logger.error(f"メディアアップロード処理中の予期せぬエラー: {e_upload}", exc_info=True)

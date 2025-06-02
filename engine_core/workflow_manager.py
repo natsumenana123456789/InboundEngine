@@ -394,7 +394,7 @@ class WorkflowManager:
                         successful_posts_count += 1
                         success_flag = True
                         error_reason_val = None
-                    else:
+        else:
                         error_reason_val = "投稿実行条件未達 (記事なし等) またはAPIエラー (Executorログ参照)"
                         logger.warning(f"タスク ({scheduled_post_data['account_id']}, {scheduled_post_data['scheduled_time'].isoformat()}) は実行されましたが、投稿には至りませんでした (Tweet IDなし)。")
                 except Exception as e:

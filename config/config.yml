@@ -57,20 +57,22 @@ auto_post_bot:
   
   twitter_accounts:
     - account_id: "ZaikerLong"
+      enabled: true
       consumer_key: "xAPh3lRibyp8qEqhXSlCPi9ls"
       consumer_secret: "EtWUYJRfXw37ZQyVP5LwQog13xi2UV3FYRvSWmYx4OF5zhg22j"
       access_token: "1332761771279601672-QZXhMnpVtjEWecoLMM40QmPCENzY0x"
       access_token_secret: "ZySI4nVscSfMjdGGpcOyOYbvRGePF13OqvVVsJ9Bss3xX"
-      posts_today: 2
+      posts_today: 5
       google_sheets_source:
-        enabled: true
+        enabled: false
         worksheet_name: "都内メンエス"
     - account_id: "hinataMaking"
+      enabled: true
       consumer_key: "dAWrjWZ9B3JPLitFAppAqYYle"
       consumer_secret: "hYVBLgMLvi5FbGn8if6587M7yNVLN7uxG6U1yqezlaiN5s853S"
       access_token: "1790120446198689792-cTjrCAE1viby3LhpKl1wvnqj6JIM4W"
       access_token_secret: "blDTtMDxtTo1WgcR4AEtZ3cs8zq8aa0BXWRlv1luYCdfv"
-      posts_today: 4
+      posts_today: 5
       google_sheets_source:
         enabled: true
         worksheet_name: "都内セクキャバ"
