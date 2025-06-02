@@ -134,6 +134,7 @@ Thumbs.db
 config/gspread-key.json
 config/oauth_credentials.json
 config/token.json
+config/app_config.dev.json
 
 # Temporary video files (if applicable, adjust path if needed)
 auto_post_bot/temp_video.mp4
@@ -189,3 +190,6 @@ config/gcp_service_account_key.json
 config/config.yml # コミットするかどうかユーザー判断 
 temp_env_values.txt config/gspread-key.json
 config/config.yml
+
+# Local only twitter accounts file
+config/local_twitter_accounts.json

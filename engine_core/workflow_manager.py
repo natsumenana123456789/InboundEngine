@@ -16,14 +16,23 @@ logger = logging.getLogger(__name__)
 # SCHEDULE_FILE_NAME と EXECUTED_LOG_FILE_NAME も同様
 
 class WorkflowManager:
-    def __init__(self, config: Config, schedule_file_path: str, executed_file_path: str):
+    def __init__(self, config: Config, schedule_file_path: str):
         self.config = config
         self.logs_dir = self.config.get("common.logs_directory", "logs") # デフォルト値を指定
         os.makedirs(self.logs_dir, exist_ok=True) # logs_dirの存在確認と作成
 
         # 引数で渡されたファイルパスを使用
         self.schedule_file_path = schedule_file_path
-        self.executed_log_file_path = executed_file_path
+
+        # executed_log_file_path を Config から取得
+        schedule_settings = self.config.get_schedule_config()
+        if schedule_settings and isinstance(schedule_settings.get("executed_file"), str):
+            self.executed_log_file_path = os.path.join(self.logs_dir, schedule_settings["executed_file"])
+        else:
+            logger.warning("Configから実行ログファイルパスが取得できませんでした。デフォルト値を使用します: logs/executed_posts.log")
+            self.executed_log_file_path = os.path.join(self.logs_dir, "executed_posts.log")
+        
+        self._ensure_schedule_file_exists() # schedule_file_path が参照可能であることを確認
 
         # コアコンポーネントの初期化
         self.spreadsheet_manager = SpreadsheetManager(config=self.config)
@@ -47,35 +56,34 @@ class WorkflowManager:
             max_posts_per_hour_globally=schedule_settings.get("max_posts_per_hour_globally")
         )
         self.post_executor = ScheduledPostExecutor(
-            config=self.config, 
-            spreadsheet_manager=self.spreadsheet_manager,
-            executed_file_path=self.executed_log_file_path # ここで渡す
+            config=self.config,
+            spreadsheet_manager=self.spreadsheet_manager
         )
         
-        # 通知用Notifier (WorkflowManager自身の通知用)
-        wf_notifier_webhook_url = self.config.get_discord_webhook_url("workflow_notifications") # config.ymlに専用IDを設定想定
-        if wf_notifier_webhook_url:
-            self.workflow_notifier = DiscordNotifier(webhook_url=wf_notifier_webhook_url)
-        elif self.post_executor.default_notifier: # executorのものを借用
-            self.workflow_notifier = self.post_executor.default_notifier
-            logger.info("Workflow通知用にExecutorのデフォルトNotifierを使用します。")
+        # DiscordNotifierのインスタンスをここで生成するか、各メソッドで都度生成するか検討
+        # WorkflowManager自体が通知を行う責務を持つなら、ここで初期化するのが自然
+        discord_webhook_url_for_summary = self.config.get_discord_webhook_url() # 全体設定のWebhook URL
+        if discord_webhook_url_for_summary:
+            self.summary_notifier = DiscordNotifier(webhook_url=discord_webhook_url_for_summary)
+            logger.info("WorkflowManager用Discordサマリー通知クライアントを初期化しました。")
         else:
-            self.workflow_notifier = None
-            logger.warning("WorkflowManager用のDiscord通知クライアントが設定されていません。")
+            self.summary_notifier = None
+            logger.info("WorkflowManager用Discordサマリー通知クライアントは初期化されませんでした (Webhook URL未設定)。")
 
-        # DiscordNotifierの初期化 (日次サマリー通知用)
-        self.summary_notifier: Optional[DiscordNotifier] = None
-        if self.config.should_notify_daily_schedule_summary():
-            webhook_url = self.config.get_discord_webhook_url("default_notification") # または専用ID
-            if webhook_url:
-                self.summary_notifier = DiscordNotifier(webhook_url)
-                logger.info("日次スケジュールサマリー通知用のDiscordNotifierを初期化しました。")
-            else:
-                logger.warning("日次スケジュールサマリー通知は有効ですが、Discord Webhook URLが設定されていません。")
-        else:
-            logger.info("日次スケジュールサマリー通知は無効です。")
+        self.workflow_notifier = self.summary_notifier # ワークフロー完了通知も同じNotifierを使うか検討
 
         logger.info("WorkflowManager初期化完了。")
+
+    def _ensure_schedule_file_exists(self):
+        if not os.path.exists(self.schedule_file_path):
+            try:
+                with open(self.schedule_file_path, 'w', encoding='utf-8') as f:
+                    json.dump({}, f) # 空のJSONオブジェクトで初期化
+                logger.info(f"スケジュールファイルが存在しなかったため、空のファイルを作成しました: {self.schedule_file_path}")
+            except IOError as e:
+                logger.error(f"空のスケジュールファイルの作成に失敗しました: {self.schedule_file_path}, Error: {e}", exc_info=True)
+                # このエラーは致命的かもしれないので、呼び出し元に伝播させるか、ここで終了させることを検討
+                raise
 
     def _save_schedule_to_file(self, schedule: List[ScheduledPost], target_date: date):
         """生成されたスケジュールをファイルにJSON形式で保存する。日付ごとに追記または上書き。"""
@@ -117,7 +125,11 @@ class WorkflowManager:
             return []
         try:
             with open(self.schedule_file_path, 'r', encoding='utf-8') as f:
-                full_schedule_data: Dict[str, List[Dict[str, Any]]] = json.load(f)
+                content = f.read()
+                if not content.strip(): # 空ファイルの場合
+                    logger.warning(f"スケジュールファイル {self.schedule_file_path} は空です。")
+                    return []
+                full_schedule_data: Dict[str, List[Dict[str, Any]]] = json.loads(content)
             
             date_str = target_date.isoformat()
             if date_str not in full_schedule_data:
@@ -129,22 +141,28 @@ class WorkflowManager:
             schedule: List[ScheduledPost] = []
             for item_dict in loaded_schedule_data:
                 try:
-                    # datetimeをISO文字列からパース。タイムゾーン情報を付与（UTCと仮定）
-                    # もし保存時にタイムゾーンがなければ、ここで付与する。パース時に awareにする。
                     time_str = item_dict["scheduled_time"]
+                    # ISOフォーマットの末尾 'Z' を '+00:00' に置換してからパース
                     if time_str.endswith('Z'):
                         time_str = time_str[:-1] + '+00:00'
                     scheduled_time_dt = datetime.fromisoformat(time_str)
 
-                    if scheduled_time_dt.tzinfo is None: # 基本的には+00:00でawareになるはず
+                    # タイムゾーン情報がない場合はUTCを強制 (fromisoformatで aware になるはずだが念のため)
+                    if scheduled_time_dt.tzinfo is None:
                          logger.warning(f"Parsed datetime {scheduled_time_dt} is naive, forcing UTC. Original str: {item_dict['scheduled_time']}")
                          scheduled_time_dt = scheduled_time_dt.replace(tzinfo=timezone.utc)
 
-                    schedule.append({
+                    # ScheduledPost TypedDict を作成
+                    scheduled_post_item: ScheduledPost = {
                         "account_id": item_dict["account_id"],
                         "scheduled_time": scheduled_time_dt,
-                        "worksheet_name": item_dict["worksheet_name"]
-                    })
+                        "worksheet_name": item_dict["worksheet_name"],
+                        "text_content_override": item_dict.get("text_content_override") # なければNone
+                    }
+                    schedule.append(scheduled_post_item)
+                except KeyError as e:
+                    logger.warning(f"スケジュール項目の必須キーが不足しています: {e}. Item: {item_dict}. スキップします。")
+                    continue
                 except Exception as e:
                     logger.warning(f"スケジュール項目のパースに失敗: {item_dict}, Error: {e}. スキップします。")
                     continue
@@ -159,14 +177,16 @@ class WorkflowManager:
 
     def _log_executed_post(self, scheduled_post: ScheduledPost, success: bool, tweet_id: Optional[str] = None, error_reason: Optional[str] = None):
         """実行結果をログファイルに追記する。"""
+        # ScheduledPost は TypedDict なので、辞書としてアクセス
         log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "account_id": scheduled_post["account_id"],
             "worksheet_name": scheduled_post["worksheet_name"],
             "scheduled_time": scheduled_post["scheduled_time"].isoformat(),
-            "executed_at": datetime.now(timezone.utc).isoformat(),
             "success": success,
             "tweet_id": tweet_id,
-            "error_reason": error_reason
+            "error_reason": error_reason,
+            "text_content_override_used": scheduled_post.get("text_content_override") is not None
         }
         try:
             with open(self.executed_log_file_path, 'a', encoding='utf-8') as f:
@@ -336,7 +356,7 @@ class WorkflowManager:
                     logger.error(f"Discordへの日次スケジュールサマリー通知中にエラー: {e_notify}", exc_info=True)
             # === 通知処理ここまで ===
 
-            executed_today_count = 0
+            # executed_today_count = 0 # この変数はここで初期化しても以降のループで再定義されるため不要か
             successful_posts_count = 0
 
             already_executed_ids_for_day = set() # 初期化
@@ -383,8 +403,7 @@ class WorkflowManager:
             logger.info(f"実行対象タスク (日次): {[(t['account_id'], t['scheduled_time'].isoformat()) for t in tasks_to_run]}")
 
             for scheduled_post_data in tasks_to_run:
-                executed_today_count += 1
-                # scheduled_post_data は ScheduledPost 型なので、そのまま渡せる
+                # executed_today_count += 1 # このカウントは len(tasks_to_run) で代替可能
                 returned_tweet_id: Optional[str] = None
                 success_flag: bool = False
                 error_reason_val: Optional[str] = "不明な実行エラー"
@@ -394,7 +413,7 @@ class WorkflowManager:
                         successful_posts_count += 1
                         success_flag = True
                         error_reason_val = None
-        else:
+                    else: # Corrected indentation
                         error_reason_val = "投稿実行条件未達 (記事なし等) またはAPIエラー (Executorログ参照)"
                         logger.warning(f"タスク ({scheduled_post_data['account_id']}, {scheduled_post_data['scheduled_time'].isoformat()}) は実行されましたが、投稿には至りませんでした (Tweet IDなし)。")
                 except Exception as e:
