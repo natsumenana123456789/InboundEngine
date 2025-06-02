@@ -278,7 +278,7 @@ class TwitterClient:
             temp_file_path = None # 元のダウンロードされた一時ファイル
             modified_temp_file_path = None # ffmpegで処理された後の一時ファイル
 
-            try: # Inner try for file processing and upload (starts at original line 281)
+            try: # Inner try for file processing and upload
                 # 一時ファイルを作成 (正しい拡張子を付ける)
                 with tempfile.NamedTemporaryFile(delete=False, prefix=file_name_prefix + '_', suffix=file_extension) as temp_f:
                     temp_f.write(media_content)
@@ -293,10 +293,10 @@ class TwitterClient:
                     if modified_temp_file_path:
                         logger.info(f"メタデータ変更成功。アップロードには変更後ファイルを使用: {modified_temp_file_path}")
                         upload_target_path = modified_temp_file_path
-            else:
+                    else: # このelseは if modified_temp_file_path: に対応
                         logger.warning(f"動画メタデータの変更に失敗。元のファイルでアップロードを続行します: {temp_file_path}")
-                        # modified_temp_file_path は None のまま
                 
+                # 上記のifブロックが終わった後 (動画処理が終わった後、または動画でなかった場合)
                 logger.info(f"メディアを一時ファイル {upload_target_path} に保存し、Twitterにアップロード中 (カテゴリ: {media_category or '未指定'}, メディアタイプ: {content_type})...")
 
                 uploaded_media = self.api_v1.media_upload(
@@ -304,19 +304,14 @@ class TwitterClient:
                     media_category=media_category,
                     chunked=is_video # 動画の場合はチャンクアップロードを有効にする
                 )
-            logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
-                # Successfully uploaded, return media_id before finally block
-            return uploaded_media.media_id_string
+                logger.info(f"メディアのアップロード成功。Media ID: {uploaded_media.media_id_string}")
+                return uploaded_media.media_id_string
 
-            except Exception as e_upload: # This except corresponds to the inner try (original L.281)
+            except Exception as e_upload: # This except corresponds to the inner try
                 logger.error(f"メディアアップロード処理中の予期せぬエラー: {e_upload}", exc_info=True)
-                # In case of upload error, we might still want to return None after cleanup
-                # but the primary return of media_id is on success within the try.
-                # For now, just log and let finally clean up. Fall through to outer error handling or return None.
-                # For clarity, if this specific block fails, it should lead to returning None from _upload_media_v1
-                pass # Error logged, will proceed to finally, then likely return None via outer excepts
+                pass 
 
-            finally: # This finally corresponds to the inner try (original L.281)
+            finally: # This finally corresponds to the inner try
                 if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.remove(temp_file_path)

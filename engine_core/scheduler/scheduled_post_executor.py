@@ -14,23 +14,12 @@ from .post_scheduler import ScheduledPost
 logger = logging.getLogger(__name__)
 
 class ScheduledPostExecutor:
-    def __init__(self, 
-                 config: Config, 
-                 spreadsheet_manager: SpreadsheetManager,
-                 executed_file_path: str):
+    def __init__(self, config: Config, spreadsheet_manager: SpreadsheetManager):
         self.config = config
         self.spreadsheet_manager = spreadsheet_manager
-        self.executed_file_path = executed_file_path
-        
-        # DiscordNotifierは都度Webhook URLを指定して初期化するか、汎用的なものを保持
-        # ここでは汎用的な通知先ID "default_notification" を使用する想定
-        default_webhook_url = self.config.get_discord_webhook_url("default_notification")
-        if default_webhook_url:
-            self.default_notifier = DiscordNotifier(webhook_url=default_webhook_url)
-            logger.info("デフォルトDiscord通知クライアントを初期化しました。")
-        else:
-            self.default_notifier = None
-            logger.warning("デフォルトのDiscord Webhook URLが設定されていません。通知は送信されません。")
+        self.executed_file_path = config.get("auto_post_bot.schedule_settings.executed_file", "logs/executed_test.txt")
+        self.twitter_clients: Dict[str, TwitterClient] = {}
+        self.default_discord_notifier = DiscordNotifier(config.get_discord_webhook_url())
 
         # self.rate_limiter = RateLimiter(calls=5, period=60) # コメントアウト
 
@@ -218,7 +207,7 @@ class ScheduledPostExecutor:
         return tweet_id
 
     def _notify_success(self, account_id: str, worksheet_name: str, article_id: str, tweet_id: str, scheduled_time: datetime, text_content: Optional[str], warning_message: Optional[str] = None):
-        if not self.default_notifier:
+        if not self.default_discord_notifier:
             return
         title = f"✅ [成功] {account_id} ツイート投稿完了"
         description = (
@@ -231,12 +220,12 @@ class ScheduledPostExecutor:
             description += f"\n本文冒頭: `{processed_text}...`"
         if warning_message:
             description += f"\n\n⚠️ **警告:** {warning_message}"
-            self.default_notifier.send_simple_notification(title, description, color=0xffa500) # オレンジ色
+            self.default_discord_notifier.send_simple_notification(title, description, color=0xffa500) # オレンジ色
         else:
-            self.default_notifier.send_simple_notification(title, description, color=0x00ff00) # 緑色
+            self.default_discord_notifier.send_simple_notification(title, description, color=0x00ff00) # 緑色
 
     def _notify_failure(self, account_id: str, worksheet_name: Optional[str], reason: str, scheduled_time: datetime, article_id: Optional[str] = None, text_content: Optional[str] = None):
-        if not self.default_notifier:
+        if not self.default_discord_notifier:
             return
         title = f"❌ [失敗] {account_id} ツイート投稿失敗"
         description = (
@@ -247,7 +236,7 @@ class ScheduledPostExecutor:
         if text_content:
             processed_text = text_content[:50].replace('\n', ' ')
             description += f"\n試行本文冒頭: `{processed_text}...`"
-        self.default_notifier.send_simple_notification(title, description, error=True)
+        self.default_discord_notifier.send_simple_notification(title, description, error=True)
     
     # def _notify_no_content(self, account_id: str, worksheet_name: str, scheduled_time: datetime):
     #     if not self.default_notifier:
@@ -260,6 +249,24 @@ class ScheduledPostExecutor:
     #         f"INFO: 投稿可能な記事が見つかりませんでした。"
     #     )
     #     self.default_notifier.send_simple_notification(title, description, color=0x0000ff) # 青色
+
+    def _get_twitter_client(self, account_id: str) -> Optional[TwitterClient]:
+        if account_id in self.twitter_clients:
+            return self.twitter_clients[account_id]
+        else:
+            account_details = self.config.get_active_twitter_account_details(account_id)
+            if account_details:
+                twitter_client = TwitterClient(
+                    consumer_key=account_details['consumer_key'],
+                    consumer_secret=account_details['consumer_secret'],
+                    access_token=account_details['access_token'],
+                    access_token_secret=account_details['access_token_secret'],
+                    bearer_token=account_details.get('bearer_token')
+                )
+                self.twitter_clients[account_id] = twitter_client
+                return twitter_client
+            else:
+                return None
 
 if __name__ == '__main__':
     import os
@@ -280,8 +287,7 @@ if __name__ == '__main__':
         
         executor = ScheduledPostExecutor(
             config=config_instance, 
-            spreadsheet_manager=spreadsheet_mgr,
-            executed_file_path=test_executed_file
+            spreadsheet_manager=spreadsheet_mgr
         )
         
         # テスト用にPostSchedulerで1件スケジュールを生成してみる

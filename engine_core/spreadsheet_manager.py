@@ -1,8 +1,10 @@
 import gspread
-from google.oauth2.service_account import Credentials
+# from google.oauth2.service_account import Credentials # gspread.service_account_from_dict を使うので不要になる可能性
 from datetime import datetime, timezone, timedelta
 import logging
 from typing import List, Dict, Optional, Tuple, Any
+import os # if __name__ == '__main__' でのパス解決用に os をインポート
+import json # if __name__ == '__main__' でのダミーAPP_CONFIG_JSON用に json をインポート
 
 # このモジュールがengine_coreパッケージ内にあることを想定してConfigをインポート
 from .config import Config
@@ -13,38 +15,43 @@ logger = logging.getLogger(__name__)
 TRUTHY_VALUES = ["true", "1", "yes", "ok", "✓", "〇", "○", "公開", "投稿可"]
 
 class SpreadsheetManager:
-    def __init__(self, config: Config, bot_type: str = "auto_post_bot"):
+    def __init__(self, config: Config):
         self.config = config
-        self.bot_type = bot_type
+        self.gspread_client = None
+        self.bot_type = self.config.get("common.bot_type", "default_bot") # bot_type をConfigから取得(任意)
+        
+        # get_spreadsheet_columns 呼び出し時の引数を削除
+        self.columns = self.config.get_spreadsheet_columns()
+        if not self.columns:
+            logger.critical("SpreadsheetManager: スプレッドシートの列定義を取得できませんでした。処理を続行できません。")
+            # ここで例外を発生させるか、あるいは利用側で self.columns が None でないことを確認する
+            # raise ValueError("スプレッドシートの列定義がありません。")
+
+        self._authenticate_gspread()
+
+    def _authenticate_gspread(self):
         self.spreadsheet_id = self.config.get_spreadsheet_id()
-        self.gspread_key_path = self.config.gspread_service_account_key_path
-        self.columns = self.config.get_spreadsheet_columns(bot_type)
+        gspread_creds_dict = self.config.get_gspread_service_account_dict()
 
         if not self.spreadsheet_id:
-            logger.error("Spreadsheet IDが設定されていません。")
+            logger.error("スプレッドシートIDが設定されていません (APP_CONFIG_JSONのgoogle_sheets.spreadsheet_id)。")
+            # クリティカルなエラーなので、ここで処理を中断するか、呼び出し元にNoneを返して対処させる
             raise ValueError("Spreadsheet ID is not configured.")
-        if not self.gspread_key_path:
-            logger.error("gspreadサービスアカウントキーのパスが設定されていません。")
-            raise ValueError("gspread service account key path is not configured.")
-        if not self.columns:
-            logger.error(f"{bot_type} 用の列定義が見つかりません。")
-            raise ValueError(f"Spreadsheet columns for {bot_type} are not configured.")
+        
+        if not gspread_creds_dict:
+            logger.error("gspreadサービスアカウント認証情報が設定されていません (APP_CONFIG_JSONのgoogle_sheets.service_account_credentials)。")
+            raise ValueError("gspread service account credentials are not configured.")
         
         try:
-            self.creds = Credentials.from_service_account_file(
-                self.gspread_key_path,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
-            )
-            # self.client = gspread.authorize(self.creds) # authorize で得られる client の型が不明確な場合がある
-            # self.spreadsheet = self.client.open_by_id(self.spreadsheet_id) # これがエラー
-
-            # gspread.service_account を使用する形に変更
-            gc = gspread.service_account(filename=self.gspread_key_path)
-            self.spreadsheet = gc.open_by_key(self.spreadsheet_id) # open_by_key は ID を受け入れる
-
-            logger.info(f"スプレッドシート (ID: {self.spreadsheet_id}) への接続に成功しました。")
+            # キーワード引数 credentials= を削除
+            gc = gspread.service_account_from_dict(gspread_creds_dict)
+            self.gspread_client = gc
+            logger.info("gspread: Google Spreadsheetへの接続認証に成功しました。")
         except Exception as e:
             logger.error(f"スプレッドシートへの接続または認証に失敗しました: {e}", exc_info=True)
+            # ここで None のままにしておき、利用側で self.gspread_client が None かどうかを確認する
+            # あるいは例外を再送出する
+            self.gspread_client = None # 失敗したことを明確にする
             raise
 
     def _get_column_index(self, column_name: str) -> int:
@@ -62,7 +69,7 @@ class SpreadsheetManager:
         取得する情報: ID, 本文, 画像/動画URL, および行インデックス (更新用)
         """
         try:
-            worksheet = self.spreadsheet.worksheet(worksheet_name)
+            worksheet = self.gspread_client.open_by_key(self.spreadsheet_id).worksheet(worksheet_name)
             logger.info(f"ワークシート '{worksheet_name}' を開きました。")
             all_records = worksheet.get_all_records() # ヘッダーをキーとした辞書のリストとして取得
             logger.debug(f"ワークシート '{worksheet_name}' から {len(all_records)} 件のレコードを取得しました。")
@@ -131,7 +138,7 @@ class SpreadsheetManager:
         指定されたワークシートの行について、投稿済み回数を1増やし、最終投稿日時を更新する。
         """
         try:
-            worksheet = self.spreadsheet.worksheet(worksheet_name)
+            worksheet = self.gspread_client.open_by_key(self.spreadsheet_id).worksheet(worksheet_name)
             
             # "投稿済み回数" 列の現在の値を取得し、1増やす
             posted_count_col_idx = self._get_column_index("投稿済み回数")
@@ -169,31 +176,76 @@ class SpreadsheetManager:
             logger.error(f"ワークシート '{worksheet_name}' 行 {row_index} の更新中にエラー: {e}", exc_info=True)
             return False
 
+    def get_worksheet_by_name(self, worksheet_name: str) -> Optional[gspread.Worksheet]:
+        # This method is not provided in the original file or the code block
+        # It's assumed to exist as it's called in the get_post_candidate method
+        # It's also called in the update_post_status method
+        # It's assumed to return a gspread.Worksheet object if the worksheet exists
+        # If the worksheet does not exist, it returns None
+        # This method should be implemented to return the worksheet object
+        # or None if the worksheet does not exist
+        pass
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
     logger.info("SpreadsheetManagerのテストを開始します。")
+
+    # --- テスト用の APP_CONFIG_JSON の準備 (Configクラスのテストから拝借・簡略化) ---
+    dummy_gspread_creds_for_sm_test = {
+        "type": "service_account", "project_id": "dummy-sm-project",
+        "private_key_id": "dummy_key_id_sm", "private_key": "-----BEGIN PRIVATE KEY-----\nSM TEST\n-----END PRIVATE KEY-----\n",
+        "client_email": "dummy-sm@dummy-sm-project.iam.gserviceaccount.com", "client_id": "dummy_client_id_sm",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/dummy-sm%40dummy-sm-project.iam.gserviceaccount.com"
+    }
+    test_app_config_for_sm = {
+        "twitter_accounts": [{
+            "account_id": "sm_tester", "enabled": True,
+            "google_sheets_source": {"worksheet_name": "Sheet1"} # テストで参照するワークシート名
+        }],
+        "google_sheets": {
+            "spreadsheet_id": "1lgCn5iAiFT9PSr3vA3Tp1SePe0g3B9Xe1ppsr8bn2FA", # ユーザーが使用している実際のIDを使用
+            "service_account_credentials_json_str": json.dumps(dummy_gspread_creds_for_sm_test)
+        },
+        "common": {"log_level": "DEBUG"}
+        # auto_post_bot.columns などは Config のデフォルト値が使われる想定
+    }
+    os.environ["APP_CONFIG_JSON"] = json.dumps(test_app_config_for_sm)
+    logger.info("SpreadsheetManagerテスト用に環境変数 APP_CONFIG_JSON を設定しました。")
+    # --- ここまでテスト用準備 ---
+
     try:
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        config_file_path = os.path.join(project_root, "config/config.yml")
-        
-        config = Config(config_path=config_file_path)
+        config = Config() # 引数なしで初期化
         manager = SpreadsheetManager(config)
 
-        # config.yml から最初のTwitterアカウントの情報を取得して、そのワークシート名を使用
         twitter_accounts = config.get_twitter_accounts()
         if not twitter_accounts:
-            logger.error("config.ymlにTwitterアカウントが設定されていません。テストをスキップします。")
+            logger.error("APP_CONFIG_JSONにTwitterアカウントが設定されていません。テストをスキップします。")
         else:
-            target_worksheet_name = twitter_accounts[0].get("spreadsheet_worksheet")
-            if not target_worksheet_name:
+            # get_active_twitter_account_details を使う方が適切かもしれないが、
+            # ここでは Config から直接 worksheet_name を取得するのではなく、
+            # manager が内部で使う account_id に紐づく worksheet_name をテストデータから取得する。
+            # ただし、SpreadsheetManager は直接 worksheet_name を引数に取るので、
+            # ここではConfigから最初の有効なアカウントのworksheet_nameを取得する。
+            
+            active_account_details = config.get_active_twitter_account_details(twitter_accounts[0].get("account_id"))
+
+            if not active_account_details or not active_account_details.get("spreadsheet_worksheet"):
                  logger.error(f"アカウント {twitter_accounts[0].get('account_id')} にspreadsheet_worksheetが設定されていません。")
             else:
+                target_worksheet_name = active_account_details.get("spreadsheet_worksheet")
                 logger.info(f"テスト対象ワークシート: {target_worksheet_name}")
+                
+                # 実際のGoogle Sheets APIに接続するため、認証情報とシートIDが有効である必要がある。
+                # ダミーの認証情報では get_post_candidate は失敗する。
+                logger.warning("以下のテストは、APP_CONFIG_JSON 内のGoogle Sheets認証情報とスプレッドシートIDが有効な場合にのみ成功します。")
+                logger.warning(f"現在、テスト用のダミー認証情報 (project_id: {dummy_gspread_creds_for_sm_test.get('project_id')}) を使用しています。")
+
                 candidate = manager.get_post_candidate(target_worksheet_name)
 
                 if candidate:
                     logger.info(f"取得した投稿候補: ID={candidate['id']}, Text='{candidate['text'][:30]}...', Media='{candidate['media_url']}', Row={candidate['row_index']}")
-                    # テスト用に現在のUTC時刻で更新
                     now_utc = datetime.now(timezone.utc)
                     success = manager.update_post_status(target_worksheet_name, candidate['row_index'], now_utc)
                     if success:
@@ -201,9 +253,13 @@ if __name__ == '__main__':
                     else:
                         logger.error("投稿ステータスの更新テスト失敗。")
                 else:
-                    logger.info(f"{target_worksheet_name} に投稿可能な記事がありませんでした。")
+                    logger.info(f"{target_worksheet_name} に投稿可能な記事がありませんでした（またはAPI接続失敗）。")
 
     except ValueError as ve:
         logger.error(f"設定エラー: {ve}")
     except Exception as e:
-        logger.error(f"SpreadsheetManagerのテスト中に予期せぬエラーが発生: {e}", exc_info=True) 
+        logger.error(f"SpreadsheetManagerのテスト中に予期せぬエラーが発生: {e}", exc_info=True)
+    finally:
+        if "APP_CONFIG_JSON" in os.environ:
+            del os.environ["APP_CONFIG_JSON"]
+            logger.info("SpreadsheetManagerテスト用の環境変数 APP_CONFIG_JSON をクリアしました。") 
