@@ -219,9 +219,35 @@ class WorkflowManager:
         schedule = self.post_scheduler.generate_schedule_for_day(target_date)
         self._save_schedule_to_file(schedule, target_date)
         if self.workflow_notifier:
+            description_message = f"{target_date.isoformat()} の投稿スケジュールを {len(schedule)} 件生成しました。"
+            if schedule:
+                schedule_details = []
+                jst = timezone(timedelta(hours=9))
+                for post in schedule: # 件数制限を削除
+                    jst_time_str = "時刻不明"
+                    try:
+                        if post["scheduled_time"].tzinfo is None:
+                            scheduled_time_utc = post["scheduled_time"].replace(tzinfo=timezone.utc)
+                        else:
+                            scheduled_time_utc = post["scheduled_time"].astimezone(timezone.utc)
+                        
+                        scheduled_time_jst = scheduled_time_utc.astimezone(jst)
+                        jst_time_str = scheduled_time_jst.strftime('%H:%M')
+                    except Exception as e:
+                        logger.warning(f"Scheduled time to JST conversion error: {e}, for post: {post}")
+
+                    schedule_details.append(
+                        f"- {post['account_id']} ({post['worksheet_name']}) at {jst_time_str} (JST)"
+                    )
+                description_message += "\n\n**スケジュール詳細:**\n" + "\n".join(schedule_details)
+            else:
+                description_message += "\nスケジュールされた投稿はありませんでした。" 
+
+            description_message += "\n\n詳細はログファイルを確認してください。"
+
             self.workflow_notifier.send_simple_notification(
                 title=f"📅 スケジュール生成完了 ({target_date.isoformat()})",
-                description=f"{target_date.isoformat()} の投稿スケジュールを {len(schedule)} 件生成しました。詳細はログファイルを確認してください。",
+                description=description_message,
                 color=0x00ff00 if schedule else 0xffa500 # 投稿があれば緑、なければオレンジ
             )
         logger.info(f"{target_date.isoformat()} のスケジュール生成処理を完了しました。")
