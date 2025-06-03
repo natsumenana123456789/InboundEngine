@@ -1,21 +1,16 @@
-name: Auto Post Bot CI/CD
+name: Generate Daily Post Schedule
 
 on:
-  push:
-    branches:
-      - main
-      - master
-      - develop
   schedule:
     # 毎日日本時間9時に実行 (UTCで0時)
     - cron: '0 0 * * *'
   workflow_dispatch: # 手動実行を許可
 
 jobs:
-  run-bot:
+  generate-schedule-job: # ジョブ名を変更
     runs-on: ubuntu-latest
     env:
-      TZ: 'Asia/Tokyo' # タイムゾーンをJSTに設定
+      TZ: 'Asia/Tokyo'
 
     steps:
     - name: Checkout repository
@@ -33,32 +28,27 @@ jobs:
 
     - name: Set APP_CONFIG_JSON Environment Variable from Secret
       env:
-        APP_CONFIG_CONTENT: ${{ secrets.APP_CONFIG_JSON }} # 単一のシークレットを読み込む
+        APP_CONFIG_CONTENT: ${{ secrets.APP_CONFIG_JSON }}
       run: |
         if [ -z "${APP_CONFIG_CONTENT}" ]; then
-          echo "::error::Secret APP_CONFIG_JSON is not set or is empty. Please ensure it is configured in GitHub repository/organization secrets."
+          echo "::error::Secret APP_CONFIG_JSON is not set or is empty."
           exit 1
         fi
-        # GITHUB_ENV を使って後続のステップで利用可能な環境変数を設定
-        # JSON文字列が複数行になる可能性を考慮し、ヒアドキュメント形式で設定
         delimiter=$(uuidgen)
         echo "APP_CONFIG_JSON<<${delimiter}" >> $GITHUB_ENV
         echo "${APP_CONFIG_CONTENT}" >> $GITHUB_ENV
         echo "${delimiter}" >> $GITHUB_ENV
-        echo "APP_CONFIG_JSON environment variable has been set from secrets.APP_CONFIG_JSON."
+        echo "APP_CONFIG_JSON environment variable has been set."
 
     - name: Generate daily schedule
       run: python main.py --generate-schedule
-
-    - name: Execute scheduled posts
-      run: python main.py --process-now
 
     - name: Discord Notification on Failure
       if: failure()
       uses: tsickert/discord-webhook@v5.3.0
       with:
-        webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }} # 失敗通知用Webhook URLは別途シークレットとして必要
-        content: "❌ GitHub Actions Workflow Failed: ${{ github.workflow }} / ${{ github.job }} on ${{ github.ref }}"
+        webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL_FAILURE }} # 失敗通知用
+        content: "❌ Schedule Generation Failed: ${{ github.workflow }} / ${{ github.job }} on ${{ github.ref }}"
 
     # - name: Discord Notification on Success (オプション: 必要に応じて有効化)
     #   if: success()
