@@ -50,7 +50,7 @@ class Config:
             except json.JSONDecodeError as e:
                 logger.critical(f"{loaded_config_source} のJSONパースに失敗しました: {e}。設定は空になります。")
                 self._config_data = {}
-            except Exception as e:
+        except Exception as e:
                 logger.critical(f"{loaded_config_source} の処理中に予期せぬエラー: {e}。設定は空になります。")
                 self._config_data = {}
         else:
@@ -130,13 +130,13 @@ class Config:
                 continue
             
             acc = dict(acc_raw) 
-            if 'enabled' not in acc:
-                acc['enabled'] = True
+                    if 'enabled' not in acc:
+                        acc['enabled'] = True
 
             if not acc.get("account_id"):
                 logger.warning(f"twitter_accounts 内のアカウント設定に account_id がありません: {acc}")
                 continue
-            processed_accounts.append(acc)
+                    processed_accounts.append(acc)
         
         if not processed_accounts: # 有効無効に関わらず、リストが空なら警告
             logger.warning("設定ファイルに twitter_accounts が見つからないか、有効なアカウント設定がありません。")
