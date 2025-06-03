@@ -207,9 +207,16 @@ def main():
                 config=config_instance,
                 schedule_file_path=final_schedule_file_path
             )
+            # 現在時刻を取得 (generate_daily_schedule に渡すため)
+            now_for_schedule_generation = datetime.now(timezone.utc) if args.generate_schedule else None
+
             if args.generate_schedule:
                 logger.info(f"{target_d.isoformat()} のスケジュールを生成します... 強制: {args.force_regenerate}")
-                workflow_manager.generate_daily_schedule(target_date=target_d, force_regenerate=args.force_regenerate)
+                workflow_manager.generate_daily_schedule(
+                    target_date=target_d, 
+                    force_regenerate=args.force_regenerate,
+                    execution_trigger_time_utc=now_for_schedule_generation
+                )
             if args.process_now:
                 logger.info(f"{target_d.isoformat()} のスケジュール投稿処理を実行します...")
                 workflow_manager.process_scheduled_posts_now(target_date=target_d) 
