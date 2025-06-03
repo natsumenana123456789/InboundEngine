@@ -399,6 +399,122 @@ class TwitterClient:
         
         return self.post_tweet(text, media_ids=media_id_list)
 
+    def post_reply(self, text: str, in_reply_to_tweet_id: str, media_ids: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+        """指定されたツイートにリプライを投稿する (v2 API)。"""
+        if not self.client_v2:
+            logger.error("Twitter API v2 クライアントが初期化されていません。リプライを投稿できません。")
+            return None
+
+        logger.info(f"リプライ投稿開始: Text='{text[:30]}...', InReplyTo='{in_reply_to_tweet_id}', MediaIDs={media_ids}")
+        
+        actual_media_ids_for_api = media_ids if media_ids else None
+
+        # create_tweet に渡す引数を準備
+        kwargs = {
+            "text": text,
+        }
+        if actual_media_ids_for_api:
+            kwargs["media_ids"] = actual_media_ids_for_api
+        
+        # 'reply' という不正な引数ではなく、'in_reply_to_tweet_id' を直接渡す
+        kwargs["in_reply_to_tweet_id"] = in_reply_to_tweet_id
+        
+        # User Context認証が必要な場合は user_auth=True を指定。
+        # デフォルトではApp Contextで動作しようとする可能性があるため、明示的にUser Contextを指定する。
+        # ただし、tweepy.Clientがconsumer_key等で初期化されていれば、
+        # create_tweetはUser Contextで動作するはず。念のため。
+        # kwargs["user_auth"] = True # tweepyのClientの初期化方法によっては不要かもしれない
+
+        try:
+            # response = self.client_v2.create_tweet(**kwargs) # 修正前
+            response = self.client_v2.create_tweet( # 修正後: 引数を展開せず、必須のものとin_reply_to_tweet_idを明示的に渡す
+                text=text,
+                in_reply_to_tweet_id=in_reply_to_tweet_id,
+                media_ids=actual_media_ids_for_api
+                # user_auth=True # こちらにも適用
+            )
+
+            if response and response.data:
+                logger.info(f"リプライ投稿成功。Tweet ID: {response.data['id']}, Text: {response.data['text'][:30]}...")
+                return {"id": response.data["id"], "text": response.data["text"]}
+            else:
+                logger.error("リプライ投稿後、APIからのレスポンスが不正です。")
+                return None
+
+        except tweepy.errors.Forbidden as e: # 403 Forbidden
+            rate_limit_details = self._get_rate_limit_info_from_exception(e)
+            error_message = f"リプライ投稿失敗 (403 Forbidden): {str(e)}. Details: {rate_limit_details['raw_info']}"
+            logger.error(error_message, exc_info=True)
+            # RateLimitErrorをraiseしない (Forbiddenは必ずしもレート制限ではないため)
+            # ただし、ヘッダーにレート制限情報があればRateLimitErrorを発生させてもよい
+            if "x-rate-limit-remaining" in e.response.headers and e.response.headers["x-rate-limit-remaining"] == "0":
+                 raise RateLimitError(
+                    message=f"リプライ投稿中にAPIレート制限 (403 Forbidden): {str(e)}",
+                    reset_at_utc=rate_limit_details.get('reset_at_utc'),
+                    remaining_seconds=rate_limit_details.get('remaining_seconds')
+                )
+            # それ以外の403エラーはそのまま失敗として処理
+            return None
+        except tweepy.errors.TooManyRequests as e: # 429 Too Many Requests
+            rate_limit_details = self._get_rate_limit_info_from_exception(e)
+            raise RateLimitError(
+                message=f"リプライ投稿中にAPIレート制限 (429 Too Many Requests): {str(e)}",
+                reset_at_utc=rate_limit_details.get('reset_at_utc'),
+                remaining_seconds=rate_limit_details.get('remaining_seconds')
+            )
+        except tweepy.errors.TweepyException as e:
+            # ここでTweepyExceptionをキャッチする前に、より具体的な例外 (例: BadRequest) を上に書くことも検討
+            logger.error(f"リプライ投稿中に予期せぬTweepyエラー: {e}", exc_info=True)
+            return None
+        except Exception as e:
+            logger.error(f"リプライ投稿中に予期せぬ一般エラー: {e}", exc_info=True)
+            return None
+
+    def delete_tweet(self, tweet_id: str) -> bool:
+        """指定されたIDのツイートを削除する (v2 API)。成功すればTrueを返す。"""
+        if not self.client_v2:
+            logger.error("Twitter API v2 クライアントが初期化されていません。ツイートを削除できません。")
+            return False
+        
+        try:
+            logger.info(f"ツイート削除開始: ID={tweet_id}")
+            response = self.client_v2.delete_tweet(id=tweet_id)
+            if response and response.data and response.data.get('deleted') is True:
+                logger.info(f"ツイート削除成功: ID={tweet_id}")
+                return True
+            else:
+                # 削除失敗時、response.data が存在しない場合や、response.data['deleted'] が False の場合がある
+                # response.errors も確認すると良い
+                error_detail = "不明な理由"
+                if response and response.errors:
+                    error_detail = str(response.errors)
+                elif response and response.data: # dataはあるがdeletedではない場合
+                    error_detail = f"API応答 data={response.data}"
+
+                logger.error(f"ツイート削除失敗: ID={tweet_id}. Detail: {error_detail}. RawResponse: {response}")
+                return False
+        except tweepy.errors.TooManyRequests as e_429:
+            logger.warning(f"ツイート削除中にレート制限 (429 Too Many Requests): {e_429}")
+            # 削除処理でのレート制限は致命的ではないかもしれないので、エラーをraiseせずFalseを返すことも検討
+            # ここでは一旦RateLimitErrorをraiseする (呼び出し側でハンドリングを期待)
+            rate_limit_details = self._get_rate_limit_info_from_exception(e_429)
+            raise RateLimitError(
+                message=f"Twitter APIレート制限 (ツイート削除): {e_429}",
+                reset_at_utc=rate_limit_details.get("reset_at_utc"),
+                remaining_seconds=rate_limit_details.get("remaining_seconds")
+            )
+        except tweepy.errors.Forbidden as e_403: # 自分のツイートでない、または権限不足
+            logger.error(f"ツイート削除中に権限エラー (403 Forbidden): {e_403}. 対象ツイートの所有権やアプリ権限を確認してください。 ID={tweet_id}, Response: {e_403.response.text if e_403.response else 'N/A'}", exc_info=True)
+            return False
+        except tweepy.errors.NotFound as e_404: # ツイートが存在しない
+            logger.warning(f"削除対象のツイートが見つかりませんでした (404 Not Found): ID={tweet_id}")
+            return False # 見つからない場合は、ある意味「削除済み」とも言えるのでTrueを返すか議論の余地あり。ここではFalse。
+        except tweepy.errors.TweepyException as e:
+            logger.error(f"ツイート削除中に予期せぬTweepyエラー: {e}. ID={tweet_id}", exc_info=True)
+            return False
+        except Exception as e_general:
+            logger.error(f"ツイート削除中に予期せぬ一般エラー: {e_general}. ID={tweet_id}", exc_info=True)
+            return False
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
