@@ -196,12 +196,12 @@ class WorkflowManager:
         except Exception as e:
             logger.error(f"実行ログの書き込みに失敗: {e}", exc_info=True)
 
-    def generate_daily_schedule(self, target_date: Optional[date] = None, force_regenerate: bool = False):
+    def generate_daily_schedule(self, target_date: Optional[date] = None, force_regenerate: bool = False, execution_trigger_time_utc: Optional[datetime] = None):
         """指定された日付（デフォルトは今日）のスケジュールを生成しファイルに保存する。"""
         if target_date is None:
             target_date = datetime.now(timezone.utc).date()
         
-        logger.info(f"{target_date.isoformat()} のスケジュール生成処理を開始します。強制再生成: {force_regenerate}")
+        logger.info(f"{target_date.isoformat()} のスケジュール生成処理を開始します。強制再生成: {force_regenerate}, 実行トリガー時刻UTC: {execution_trigger_time_utc.isoformat() if execution_trigger_time_utc else 'N/A'}")
         
         # 強制再生成でない場合、既存のスケジュールがあればそれを使用
         if not force_regenerate:
@@ -216,7 +216,7 @@ class WorkflowManager:
                     )
                 return
 
-        schedule = self.post_scheduler.generate_schedule_for_day(target_date)
+        schedule = self.post_scheduler.generate_schedule_for_day(target_date, execution_trigger_time_utc=execution_trigger_time_utc)
         self._save_schedule_to_file(schedule, target_date)
         if self.workflow_notifier:
             description_message = f"{target_date.isoformat()} の投稿スケジュールを {len(schedule)} 件生成しました。"
