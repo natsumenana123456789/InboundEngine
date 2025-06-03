@@ -8,10 +8,10 @@
         "service_account_credentials": {
             "type": "service_account",
             "project_id": "inboundengine",
-            "private_key_id": "YOUR_PRIVATE_KEY_ID_HERE",
-            "private_key": "YOUR_PRIVATE_KEY_PEM_FORMAT_HERE",
-            "client_email": "YOUR_CLIENT_EMAIL_HERE@inboundengine.iam.gserviceaccount.com",
-            "client_id": "YOUR_CLIENT_ID_HERE",
+            "private_key_id": "YOUR_PRIVATE_KEY_ID_PLACEHOLDER",
+            "private_key": "YOUR_PRIVATE_KEY_PLACEHOLDER",
+            "client_email": "inboundengine@inboundengine.iam.gserviceaccount.com",
+            "client_id": "104368990449456985020",
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
@@ -23,10 +23,10 @@
         {
             "account_id": "ZaikerLong",
             "enabled": true,
-            "consumer_key": "YOUR_CONSUMER_KEY_ZaikerLong",
-            "consumer_secret": "YOUR_CONSUMER_SECRET_ZaikerLong",
-            "access_token": "YOUR_ACCESS_TOKEN_ZaikerLong",
-            "access_token_secret": "YOUR_ACCESS_TOKEN_SECRET_ZaikerLong",
+            "consumer_key": "xAPh3lRibyp8qEqhXSlCPi9ls",
+            "consumer_secret": "EtWUYJRfXw37ZQyVP5LwQog13xi2UV3FYRvSWmYx4OF5zhg22j",
+            "access_token": "1332761771279601672-QZXhMnpVtjEWecoLMM40QmPCENzY0x",
+            "access_token_secret": "ZySI4nVscSfMjdGGpcOyOYbvRGePF13OqvVVsJ9Bss3xX",
             "google_sheets_source": {
                 "worksheet_name": "都内メンエス"
             },
@@ -35,17 +35,17 @@
         {
             "account_id": "hinataMaking",
             "enabled": true,
-            "consumer_key": "YOUR_CONSUMER_KEY_hinataMaking",
-            "consumer_secret": "YOUR_CONSUMER_SECRET_hinataMaking",
-            "access_token": "YOUR_ACCESS_TOKEN_hinataMaking",
-            "access_token_secret": "YOUR_ACCESS_TOKEN_SECRET_hinataMaking",
+            "consumer_key": "dAWrjWZ9B3JPLitFAppAqYYle",
+            "consumer_secret": "hYVBLgMLvi5FbGn8if6587M7yNVLN7uxG6U1yqezlaiN5s853S",
+            "access_token": "1790120446198689792-cTjrCAE1viby3LhpKl1wvnqj6JIM4W",
+            "access_token_secret": "blDTtMDxtTo1WgcR4AEtZ3cs8zq8aa0BXWRlv1luYCdfv",
             "google_sheets_source": {
                 "worksheet_name": "都内セクキャバ"
             },
             "posts_today": 5
         }
     ],
-    "discord_webhook_url": "YOUR_DISCORD_WEBHOOK_URL_HERE",
+    "discord_webhook_url": "https://discord.com/api/webhooks/1378206571556765707/8_9FQToOU1qwc7xESSfJlizX9Xx-Ls1NxZQMF0Xht9wuTR9FozY9PihorKn0RromKqRp",
     "auto_post_bot": {
         "columns": [
             "ID",

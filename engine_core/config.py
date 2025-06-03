@@ -141,7 +141,7 @@ class Config:
         if not processed_accounts: # 有効無効に関わらず、リストが空なら警告
             logger.warning("設定ファイルに twitter_accounts が見つからないか、有効なアカウント設定がありません。")
         return processed_accounts
-    
+
     def get_active_twitter_accounts(self) -> List[Dict[str, Any]]:
         all_accounts = self.get_twitter_accounts()
         active_accounts = []
@@ -219,7 +219,7 @@ class Config:
                 default_posts_per_account = default_posts_val
             else:
                 logger.warning(f"共通投稿数設定 (auto_post_bot.posting_settings.posts_per_account: {default_posts_val}) が不正(数値でないか負)です。無視されます。")
-
+        
         schedule: Dict[str, int] = {}
         has_valid_schedule_entry = False
         for account in accounts:
