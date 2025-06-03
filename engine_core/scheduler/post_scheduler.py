@@ -1,6 +1,6 @@
 import logging
 import random
-from datetime import datetime, time, timedelta, date
+from datetime import datetime, time, timedelta, date, timezone
 from typing import List, Dict, Optional, Tuple, TypedDict
 
 # このモジュールがengine_coreパッケージ内にあることを想定してConfigをインポート
@@ -36,29 +36,25 @@ class PostScheduler:
         logger.info(f"PostScheduler初期化完了: 開始={self.start_hour}時, 終了={self.end_hour}時, 最短間隔={self.min_interval_minutes}分, ScheduleFile={self.schedule_file_path}")
         logger.debug(f"アカウント毎の投稿数: {self.posts_per_account_schedule}")
 
-    def _is_within_posting_hours(self, dt: datetime) -> bool:
-        """指定された日時が投稿可能時間帯（時のみ考慮）であるかを確認する"""
-        return self.start_hour <= dt.hour < self.end_hour
+    def _is_within_posting_hours(self, dt_time: time) -> bool:  # 引数を time オブジェクトに変更
+        """指定された時刻が投稿可能時間帯（時のみ考慮）であるかを確認する"""
+        return self.start_hour <= dt_time.hour < self.end_hour
 
-    def generate_schedule_for_day(self, target_date: date) -> List[ScheduledPost]:
+    def generate_schedule_for_day(self, target_date: date, execution_trigger_time_utc: Optional[datetime] = None) -> List[ScheduledPost]:
         """
         指定された日付の投稿スケジュールを生成する。
-        投稿時刻はランダム性を持ちつつ、最短投稿間隔と時間帯制限を考慮する。
+        投稿時刻は系統的に割り当て、最短投稿間隔と時間帯制限を考慮する。
+        execution_trigger_time_utc が指定された場合、それ以降の時刻にスケジュールする。
         """
         all_scheduled_posts: List[ScheduledPost] = []
-        # 各アカウントの投稿数を集計するためのリスト
-        post_tasks_for_accounts: List[Tuple[str, Optional[str]]] = [] # (account_id, worksheet_name)
+        post_tasks_for_accounts: List[Tuple[str, Optional[str]]] = []
 
-        # 有効なTwitterアカウント情報のみを取得するよう修正
-        active_twitter_accounts = self.config.get_active_twitter_accounts() 
+        active_twitter_accounts = self.config.get_active_twitter_accounts()
 
         for acc_id, num_posts in self.posts_per_account_schedule.items():
-            # posts_per_account_schedule は Config 側で有効なアカウントのみで作られている前提
-            # 対応するアカウント設定情報を見つける
-            # active_twitter_accounts から検索することで、無効なアカウントを参照する可能性を排除
             account_config = next((acc for acc in active_twitter_accounts if acc.get("account_id") == acc_id), None)
-            if not account_config: # 基本的には Config 側でフィルタされているので発生しづらいはず
-                logger.warning(f"有効なアカウントリストにID '{acc_id}' の設定が見つかりません。posts_per_account_scheduleとの不整合の可能性があります。スキップします。")
+            if not account_config:
+                logger.warning(f"有効なアカウントリストにID '{acc_id}' の設定が見つかりません。スキップします。")
                 continue
             google_sheets_source = account_config.get("google_sheets_source")
             worksheet = None
@@ -76,45 +72,68 @@ class PostScheduler:
             logger.info(f"{target_date.isoformat()} の投稿タスクはありません。")
             return []
 
-        random.shuffle(post_tasks_for_accounts) # アカウントの投稿順をランダムにする
+        random.shuffle(post_tasks_for_accounts) # アカウントの処理順序はランダムにする
 
-        # 1日の開始と終了のdatetimeオブジェクト
-        day_start_dt = datetime.combine(target_date, time(self.start_hour, 0, 0))
-        day_end_dt = datetime.combine(target_date, time(self.end_hour, 0, 0))
+        # JSTタイムゾーンの定義
+        jst = timezone(timedelta(hours=9))
 
-        # 1時間ごとの投稿数をカウントする辞書
-        posts_in_hour: Dict[int, int] = {h: 0 for h in range(24)}
+        # 投稿可能時間帯の開始と終了を target_date の JST で定義
+        # PostSchedulerのstart_hour, end_hourはJST基準とする
+        day_start_jst_naive = time(self.start_hour, 0, 0)
+        # day_end_jst_naive は end_hour ちょうどなので、1分前までを有効とするか、比較時に < end_hour とする
+        
+        # 1時間ごとの投稿数をカウントする辞書 (JSTの時でカウント)
+        posts_in_hour_jst: Dict[int, int] = {h: 0 for h in range(24)}
+        
+        # 最後に配置した投稿の時刻 (UTC aware)
+        # アカウントごとではなく、全体の最終投稿時刻を考慮していましたが、
+        # 系統的探索では、次に配置する時刻の基準となるため、初期値はNoneでよい
+        
+        # 系統的探索のための開始カーソル時刻 (UTC aware)
+        # target_date の start_hour (JST) から開始
+        current_search_time_jst_naive = day_start_jst_naive
+        current_search_dt_utc = datetime.combine(target_date, current_search_time_jst_naive, tzinfo=jst).astimezone(timezone.utc)
 
-        last_post_time_overall = None
+        if execution_trigger_time_utc:
+            # 実行トリガー時刻が指定されている場合、それ以降から探索開始
+            # ただし、常に JST start_hour は尊重する
+            if execution_trigger_time_utc > current_search_dt_utc:
+                current_search_dt_utc = execution_trigger_time_utc
+
+        logger.info(f"スケジュール配置探索開始時刻 (UTC): {current_search_dt_utc.isoformat()}, (JST): {current_search_dt_utc.astimezone(jst).isoformat()}")
 
         for account_id, worksheet_name in post_tasks_for_accounts:
             placed_post = False
-            # 試行回数 (無限ループを避けるため)
-            for _try_count in range(100): # 100回試行して配置できなければ諦める
-                # 投稿時間帯内でランダムな分を選択 (秒は0に丸める)
-                # end_hour は含まないので、end_hour -1 までが有効
-                random_hour = random.randint(self.start_hour, self.end_hour -1)
-                random_minute = random.randint(0, 59)
-                potential_post_time = datetime.combine(target_date, time(random_hour, random_minute, 0))
+            # 投稿可能時間帯 (JST end_hour-1 の 59分まで) を超えるまで探索
+            # ループの安全停止のため、最大試行回数も設ける (例: 1日の分数 / 間隔)
+            max_iterations = (self.end_hour - self.start_hour) * 60 
+            
+            for i in range(max_iterations):
+                potential_post_time_utc = current_search_dt_utc + timedelta(minutes=i) # 1分ずつ進める
+                potential_post_time_jst = potential_post_time_utc.astimezone(jst)
+                potential_post_time_jst_naive_time = potential_post_time_jst.time()
 
-                # 1. 時間帯内か？ (基本的には上のランダム選出で保証されるはずだが念のため)
-                if not self._is_within_posting_hours(potential_post_time):
-                    continue
+                # 0. そもそも target_date の範囲か (日付が変わってないか)
+                if potential_post_time_jst.date() != target_date:
+                    # logger.debug(f"探索が日付 {target_date} を超えました。アカウント {account_id} の配置を終了します。")
+                    break # このアカウントの配置はここまで
 
-                # 2. 全体の最終投稿時刻からの最短間隔をクリアしているか？
-                if last_post_time_overall and (potential_post_time - last_post_time_overall) < timedelta(minutes=self.min_interval_minutes):
-                    continue
-                
-                # 3. (オプション) 1時間あたりの最大投稿数グローバル制限をクリアしているか？
+                # 1. JSTでの投稿時間帯内か？ (start_hour <= hour < end_hour)
+                if not self._is_within_posting_hours(potential_post_time_jst_naive_time):
+                    if potential_post_time_jst_naive_time.hour >= self.end_hour:
+                        # logger.debug(f"探索がJST {self.end_hour}時を超えました。アカウント {account_id} の配置を終了します。")
+                        break # このアカウントの配置はここまで (次の日の時間帯に入ってしまうので)
+                    continue # まだ開始時刻前ならスキップして探索を続ける
+
+                # 2. (オプション) 1時間あたりの最大投稿数グローバル制限 (JSTの時でカウント) をクリアしているか？
                 if self.max_posts_per_hour_globally is not None:
-                    if posts_in_hour.get(potential_post_time.hour, 0) >= self.max_posts_per_hour_globally:
-                        # logger.debug(f"Hour {potential_post_time.hour} has reached global post limit of {self.max_posts_per_hour_globally}. Trying another time.")
-                        continue # この時間はもう満杯
+                    if posts_in_hour_jst.get(potential_post_time_jst.hour, 0) >= self.max_posts_per_hour_globally:
+                        continue
 
-                # 4. 他の既にスケジュールされた投稿との間隔をクリアしているか？
+                # 3. 他の既にスケジュールされた投稿との間隔をクリアしているか？
                 too_close = False
-                for scheduled_item in all_scheduled_posts:
-                    if abs((potential_post_time - scheduled_item['scheduled_time']).total_seconds()) < self.min_interval_minutes * 60:
+                for scheduled_item in all_scheduled_posts: # all_scheduled_posts にはUTC awareな時刻が格納
+                    if abs((potential_post_time_utc - scheduled_item['scheduled_time']).total_seconds()) < self.min_interval_minutes * 60:
                         too_close = True
                         break
                 if too_close:
@@ -123,24 +142,26 @@ class PostScheduler:
                 # 全ての条件をクリア
                 new_post: ScheduledPost = {
                     "account_id": account_id,
-                    "scheduled_time": potential_post_time,
+                    "scheduled_time": potential_post_time_utc, # UTC aware datetime
                     "worksheet_name": worksheet_name
                 }
                 all_scheduled_posts.append(new_post)
-                last_post_time_overall = potential_post_time # 全体の最終投稿時刻を更新
-                posts_in_hour[potential_post_time.hour] = posts_in_hour.get(potential_post_time.hour, 0) + 1
+                posts_in_hour_jst[potential_post_time_jst.hour] = posts_in_hour_jst.get(potential_post_time_jst.hour, 0) + 1
+                
+                # 次の投稿の探索開始時刻を、今の投稿時刻 + 最低間隔 に更新
+                current_search_dt_utc = potential_post_time_utc + timedelta(minutes=self.min_interval_minutes)
                 placed_post = True
-                # logger.debug(f"Placed post for {account_id} at {potential_post_time.strftime('%H:%M:%S')}")
+                logger.debug(f"配置成功: {account_id} at {potential_post_time_jst.strftime('%Y-%m-%d %H:%M:%S %Z')} (UTC: {potential_post_time_utc.isoformat()})")
                 break # このタスクの配置成功、次のタスクへ
             
             if not placed_post:
-                logger.warning(f"アカウント '{account_id}' の投稿を {target_date.isoformat()} のスケジュールに配置できませんでした (試行回数超過)。")
+                logger.warning(f"アカウント '{account_id}' の投稿を {target_date.isoformat()} のスケジュールに配置できませんでした（適切な空きスロットが見つかりませんでした）。")
 
-        # 時刻順にソートして返す
         all_scheduled_posts.sort(key=lambda x: x["scheduled_time"])
         logger.info(f"{target_date.isoformat()} のスケジュール生成完了。合計 {len(all_scheduled_posts)} 件。")
-        for post_item in all_scheduled_posts:
-            logger.debug(f"  - {post_item['account_id']} @ {post_item['scheduled_time'].strftime('%Y-%m-%d %H:%M:%S')} (Sheet: {post_item['worksheet_name']})")
+        jst = timezone(timedelta(hours=9)) # 再度定義 (スコープのため)
+        for post_item in all_scheduled_posts: # デバッグログはJST表示
+            logger.debug(f"  - {post_item['account_id']} @ {post_item['scheduled_time'].astimezone(jst).strftime('%Y-%m-%d %H:%M:%S %Z')} (Sheet: {post_item['worksheet_name']})")
         return all_scheduled_posts
 
 if __name__ == '__main__':
