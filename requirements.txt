@@ -41,4 +41,8 @@ structlog==23.2.0
 # ====================================
 # openai - 現在未使用
 # pytesseract - OCR機能は現在未使用
-# snscrape - キュレーション機能は現在無効化 
+# snscrape - キュレーション機能は現在無効化
+
+pytest==7.4.4
+responses==0.24.1
+freezegun==1.4.0 
