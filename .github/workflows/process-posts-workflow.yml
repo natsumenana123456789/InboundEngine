@@ -30,6 +30,11 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+    - name: Install ffmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+
     - name: Set APP_CONFIG_JSON Environment Variable from Secret
       env:
         APP_CONFIG_CONTENT: ${{ secrets.APP_CONFIG_JSON }}
