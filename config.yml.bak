@@ -1,0 +1,37 @@
+# スプレッドシートの設定
+spreadsheet:
+  sheet_id: "1lgCn5iAiFT9PSr3vA3Tp1SePe0g3B9Xe1ppsr8bn2FA"
+  credentials_path: "credentials.json"
+  worksheets:
+    - name: "都内メンエス"
+      account: "jadiAngkat"
+    - name: "都内セクキャバ"
+      account: "hinataHHHHHH"
+
+# X（Twitter）の設定
+twitter:
+  accounts:
+    jadiAngkat:
+      api_key: "${TWITTER_API_KEY_1}"
+      api_secret: "${TWITTER_API_SECRET_1}"
+      access_token: "${TWITTER_ACCESS_TOKEN_1}"
+      access_token_secret: "${TWITTER_ACCESS_TOKEN_SECRET_1}"
+    hinataHHHHHH:
+      api_key: "${TWITTER_API_KEY_2}"
+      api_secret: "${TWITTER_API_SECRET_2}"
+      access_token: "${TWITTER_ACCESS_TOKEN_2}"
+      access_token_secret: "${TWITTER_ACCESS_TOKEN_SECRET_2}"
+
+# Discord通知の設定
+notifiers:
+  discord:
+    webhook_url: "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL"
+    colors:
+      info: "#00ff00"
+      warning: "#ffff00"
+      error: "#ff0000"
+
+# 投稿の設定
+posting:
+  min_interval_hours: 24  # 最小投稿間隔（時間）
+  max_posts_per_day: 5    # 1日の最大投稿数 

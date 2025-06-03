@@ -1,0 +1,72 @@
+{
+    "common": {
+        "log_level": "INFO",
+        "logs_directory": "logs"
+    },
+    "google_sheets": {
+        "spreadsheet_id": "1lgCn5iAiFT9PSr3vA3Tp1SePe0g3B9Xe1ppsr8bn2FA",
+        "service_account_credentials": {
+            "type": "service_account",
+            "project_id": "inboundengine",
+            "private_key_id": "YOUR_PRIVATE_KEY_ID_PLACEHOLDER",
+            "private_key": "YOUR_PRIVATE_KEY_PLACEHOLDER",
+            "client_email": "inboundengine@inboundengine.iam.gserviceaccount.com",
+            "client_id": "104368990449456985020",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/inboundengine%40inboundengine.iam.gserviceaccount.com",
+            "universe_domain": "googleapis.com"
+        }
+    },
+    "twitter_accounts": [
+        {
+            "account_id": "ZaikerLong",
+            "enabled": true,
+            "consumer_key": "xAPh3lRibyp8qEqhXSlCPi9ls",
+            "consumer_secret": "EtWUYJRfXw37ZQyVP5LwQog13xi2UV3FYRvSWmYx4OF5zhg22j",
+            "access_token": "1332761771279601672-QZXhMnpVtjEWecoLMM40QmPCENzY0x",
+            "access_token_secret": "ZySI4nVscSfMjdGGpcOyOYbvRGePF13OqvVVsJ9Bss3xX",
+            "google_sheets_source": {
+                "worksheet_name": "都内メンエス"
+            },
+            "posts_today": 5
+        },
+        {
+            "account_id": "hinataMaking",
+            "enabled": true,
+            "consumer_key": "dAWrjWZ9B3JPLitFAppAqYYle",
+            "consumer_secret": "hYVBLgMLvi5FbGn8if6587M7yNVLN7uxG6U1yqezlaiN5s853S",
+            "access_token": "1790120446198689792-cTjrCAE1viby3LhpKl1wvnqj6JIM4W",
+            "access_token_secret": "blDTtMDxtTo1WgcR4AEtZ3cs8zq8aa0BXWRlv1luYCdfv",
+            "google_sheets_source": {
+                "worksheet_name": "都内セクキャバ"
+            },
+            "posts_today": 5
+        }
+    ],
+    "discord_webhook_url": "https://discord.com/api/webhooks/1378206571556765707/8_9FQToOU1qwc7xESSfJlizX9Xx-Ls1NxZQMF0Xht9wuTR9FozY9PihorKn0RromKqRp",
+    "auto_post_bot": {
+        "columns": [
+            "ID",
+            "本文",
+            "文字数",
+            "画像/動画URL",
+            "投稿可能",
+            "投稿済み回数",
+            "最終投稿日時"
+        ],
+        "schedule_settings": {
+            "schedule_file": "schedule.json",
+            "executed_file": "executed_posts.log",
+            "test_schedule_file": "test_schedule.json",
+            "test_executed_file": "test_executed_posts.log"
+        },
+        "posting_settings": {
+            "posts_per_account": 5
+        },
+        "discord_notification": {
+            "notify_daily_schedule_summary": true
+        }
+    }
+}
