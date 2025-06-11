@@ -1,9 +1,9 @@
 name: Process Scheduled Posts
 
 on:
-  schedule:
+  # schedule:
     # 例: 15分ごとに実行
-    - cron: '*/15 * * * *'
+    # - cron: '*/15 * * * *'
   workflow_dispatch: # 手動実行も可能にしておくとデバッグに便利
 
 jobs:
