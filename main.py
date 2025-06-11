@@ -181,6 +181,7 @@ def main():
     except Exception as e:
         logger.critical(f"予期せぬクリティカルなエラーが発生しました: {e}", exc_info=True)
         print(f"予期せぬクリティカルなエラーが発生しました: {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == '__main__':
     main() 
