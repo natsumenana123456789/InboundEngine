@@ -8,8 +8,9 @@ logger = logging.getLogger(__name__)
 # DEFAULT_CONFIG は廃止
 
 class Config:
-    def __init__(self):
+    def __init__(self, config_path: Optional[str] = None):
         self._config_data: Dict[str, Any] = {}
+        self.config_path = config_path # 引数で渡されたパスを保存
         # config.py が engine_core の中にある前提でプロジェクトルートを推定
         self._project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self._load_settings()
@@ -20,11 +21,22 @@ class Config:
         loaded_config_source = None
         config_json_str = None
 
-        # 1. 環境変数 APP_CONFIG_JSON を試す (最優先)
-        app_config_json_str_env = os.environ.get("APP_CONFIG_JSON")
-        if app_config_json_str_env:
-            config_json_str = app_config_json_str_env
-            loaded_config_source = "環境変数 APP_CONFIG_JSON"
+        # 0. 引数で指定された config_path を最優先で試す
+        if self.config_path and os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    config_json_str = f.read()
+                loaded_config_source = f"指定された設定ファイル ({self.config_path})"
+            except Exception as e:
+                logger.critical(f"{self.config_path} の読み込み中にエラー: {e}")
+                config_json_str = None
+
+        # 1. 環境変数 APP_CONFIG_JSON を試す
+        if not config_json_str:
+            app_config_json_str_env = os.environ.get("APP_CONFIG_JSON")
+            if app_config_json_str_env:
+                config_json_str = app_config_json_str_env
+                loaded_config_source = "環境変数 APP_CONFIG_JSON"
         
         # 2. 環境変数からロードされなかった場合、開発用設定ファイルを試す
         if not config_json_str:
@@ -198,6 +210,13 @@ class Config:
         if not cfg or not isinstance(cfg, dict):
             logger.critical("スケジュール設定 (auto_post_bot.schedule_settings) が未設定または辞書形式ではありません。")
             return None
+        
+        # 新しいロジックで不要になるキーのチェックを削除
+        # required_files = ["schedule_file", "executed_file", "test_schedule_file", "test_executed_file"]
+        # for req_file_key in required_files:
+        #     if not cfg.get(req_file_key) or not isinstance(cfg.get(req_file_key), str):
+        #         logger.critical(f"スケジュール設定内の必須ファイルパス auto_post_bot.schedule_settings.{req_file_key} が未設定または文字列ではありません。")
+        #         return None
         return cfg
 
     def get_post_interval_hours(self) -> Optional[int]:
