@@ -32,7 +32,7 @@ class ScheduledPostExecutor:
 
         try:
             # 1. 投稿内容をスプレッドシートから取得
-            post_content = self.spreadsheet_manager.get_post_content(worksheet_name)
+            post_content = self.spreadsheet_manager.get_post_candidate(worksheet_name)
 
             if not post_content:
                 logger.warning(f"アカウント '{account_id}' のワークシート '{worksheet_name}' に投稿可能な記事がありませんでした。処理をスキップします。")
@@ -55,10 +55,10 @@ class ScheduledPostExecutor:
             logger.info(f"アカウント '{account_id}' の投稿が成功しました。Tweet ID: {tweet_id}")
 
             # 4. 投稿済みとしてスプレッドシートを更新
-            self.spreadsheet_manager.mark_as_posted(
+            self.spreadsheet_manager.update_post_status(
                 worksheet_name=worksheet_name,
                 row_index=post_content["row_index"],
-                tweet_id=tweet_id
+                posted_at=datetime.now(timezone.utc)
             )
             
             return tweet_id
