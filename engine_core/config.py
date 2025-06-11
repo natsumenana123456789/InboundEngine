@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from typing import Dict, Any, List, Optional
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,8 @@ class Config:
             )
             self._config_data = {}
 
-    def get(self, key: str, default: Optional[Any] = None) -> Optional[Any]:
+    @lru_cache(maxsize=None)
+    def get(self, key: str, default: Any = None) -> Any:
         keys = key.split('.')
         value = self._config_data
         try:
@@ -195,16 +197,34 @@ class Config:
             logger.info("Discord Webhook URL (discord_webhook_url) が未設定です。Discord通知は行われません。")
         return url
 
-    def get_spreadsheet_columns(self) -> Optional[List[str]]:
-        columns = self.get("auto_post_bot.columns")
-        logger.info(f"読み込まれたカラム設定 (get_spreadsheet_columns): {columns}")
-        if columns is None:
-            logger.critical("スプレッドシートのカラム設定 (auto_post_bot.columns) が見つかりません。")
-            return None
-        if not isinstance(columns, list) or not all(isinstance(item, str) for item in columns):
-            logger.critical("スプレッドシート列定義 (auto_post_bot.columns) がリスト形式でないか、文字列以外の要素を含んでいます。")
-            return None
-        return columns
+    @lru_cache(maxsize=None)
+    def get_spreadsheet_columns(self) -> Dict[str, str]:
+        """
+        スプレッドシートの列名設定を辞書として取得する。
+        設定ファイルの内容をデフォルト値にマージして返す。
+        """
+        default_columns = {
+            "id": "ID",
+            "text": "本文",
+            "char_count": "文字数",
+            "media_url": "画像/動画URL",
+            "postable": "投稿可能",
+            "posted_count": "投稿済み回数",
+            "last_posted_at": "最終投稿日時"
+        }
+        
+        # 設定ファイルから 'auto_post_bot.spreadsheet_columns' を辞書として取得
+        config_columns = self.get("auto_post_bot.spreadsheet_columns")
+        
+        # config_columns が辞書であることを確認し、そうであればデフォルトを更新
+        if isinstance(config_columns, dict):
+            default_columns.update(config_columns)
+            logger.info(f"設定ファイルから読み込んだ列定義でデフォルトを更新しました。")
+        else:
+            logger.info("設定ファイルに 'auto_post_bot.spreadsheet_columns' のカスタム定義が見つからないか、形式が不正です。デフォルトの列定義を使用します。")
+
+        logger.info(f"確定したスプレッドシート列定義: {default_columns}")
+        return default_columns
 
     def get_schedule_config(self) -> Optional[Dict[str, Any]]:
         cfg = self.get("auto_post_bot.schedule_settings")
