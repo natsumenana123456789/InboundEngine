@@ -137,14 +137,24 @@ class WorkflowManager:
         for account in accounts_to_post:
             account_id = account["account_id"]
             try:
-                # 現在のPythonインタプリタを使ってmain.pyをワーカーとして起動
-                command = [sys.executable, "main.py", "--worker", account_id]
-                subprocess.Popen(command)
-                logger.info(f"ワーカープロセスを起動しました: `{' '.join(command)}`")
+                # 現在のPythonインタプリタを使ってmain.pyをワーカーとして逐次実行
+                # subprocess.Popenから.runに変更し、GitHub Actions上でワーカーが確実に実行完了するのを待つ
+                command = [
+                    sys.executable, 
+                    "main.py", 
+                    "--config", 
+                    self.config.config_path, # 親プロセスが使用したconfigパスをワーカーに引き継ぐ
+                    "--worker", 
+                    account_id
+                ]
+                logger.info(f"ワーカープロセスを起動します: `{' '.join(command)}`")
+                # check=Trueで、ワーカーがエラー終了した場合に例外を発生させる
+                subprocess.run(command, check=True) 
             except Exception as e:
-                logger.error(f"ワーカープロセス `main.py --worker {account_id}` の起動に失敗: {e}", exc_info=True)
+                logger.error(f"ワーカープロセス `main.py --worker {account_id}` の実行に失敗: {e}", exc_info=True)
+                # 失敗しても次のアカウントの処理は続ける
 
-        logger.info(f"すべてのワーカー ({len(accounts_to_post)}件) を起動しました。司令塔プロセスを終了します。")
+        logger.info(f"すべてのワーカー ({len(accounts_to_post)}件) の処理が完了しました。司令塔プロセスを終了します。")
 
     def _notify_status_to_discord(self, accounts_to_post, active_accounts):
         """現在の全アカウントのステータスをDiscordにテーブル形式で通知する。"""
