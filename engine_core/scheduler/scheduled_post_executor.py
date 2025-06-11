@@ -2,10 +2,10 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
-from ..config import AppConfig
-from ..utils.logging_utils import get_logger
-from ..spreadsheet_manager import SpreadsheetManager
-from ..twitter_client import TwitterClient
+from .config import AppConfig
+from .utils.logging_utils import get_logger
+from .spreadsheet_manager import SpreadsheetManager
+from .twitter_client import TwitterClient
 
 logger = get_logger(__name__)
 

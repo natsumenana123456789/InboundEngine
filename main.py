@@ -155,29 +155,42 @@ def main():
         exit(0)
 
     try:
-        workflow_manager = WorkflowManager(config=config)
-        
+        # (重要) このファイルが engine_core の外にあるため、
+        # engine_core をパッケージとして正しく認識させるために
+        # プロジェクトルートをPythonのモジュール検索パスに追加する
+        project_root = get_project_root()
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+
+        from engine_core.config import AppConfig
+        from engine_core.workflow_manager import WorkflowManager
+
+        config = AppConfig(config_path=args.config)
+        manager = WorkflowManager(config=config)
+
         if args.process:
             logger.info("モード: --process (司令塔)")
-            workflow_manager.launch_pending_posts()
-        elif args.manual_test:
-            logger.info(f"モード: --manual-test (アカウントID: {args.manual_test})")
-            workflow_manager.run_manual_test_post(args.manual_test)
+            manager.launch_pending_posts()
         elif args.worker:
             logger.info(f"モード: --worker (アカウントID: {args.worker})")
-            workflow_manager.execute_worker_post(args.worker)
+            manager.execute_worker_post(args.worker)
+        elif args.manual_test:
+            logger.info(f"モード: --manual-test (アカウントID: {args.manual_test})")
+            manager.run_manual_test_post(args.manual_test)
 
         logger.info("システムメイン処理を正常に終了しました。")
 
-    except ValueError as ve: 
-        logger.critical(f"設定エラーまたはコマンドライン引数エラー: {ve}", exc_info=True)
-        print(f"致命的なエラー: {ve}")
-    except ImportError as ie: 
-        logger.critical(f"モジュールのインポートエラー: {ie}. 構造やPYTHONPATHを確認してください。", exc_info=True)
-        print(f"致命的なエラー: {ie}")
+    except (ModuleNotFoundError, ImportError) as e:
+        logger.error(f"engine_coreモジュールが見つかりません。PYTHONPATHを確認するか、プロジェクトルートから実行してください。詳細: {e}")
+        logger.error(f"現在のsys.path: {sys.path}")
+        print("\nERROR: engine_coreモジュールが見つかりません。PYTHONPATHを確認するか、プロジェクトルートから実行してください。", file=sys.stderr)
+        print(f"詳細: {e}", file=sys.stderr)
+        print(f"現在のsys.path: {sys.path}", file=sys.stderr)
+        print("例: `python main.py` (プロジェクトルートにいる場合)", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        logger.critical(f"メイン処理中に予期せぬ最上位エラー: {e}", exc_info=True)
-        print(f"致命的なエラーが発生しました: {e}")
+        logger.critical(f"予期せぬクリティカルなエラーが発生しました: {e}", exc_info=True)
+        print(f"予期せぬクリティカルなエラーが発生しました: {e}", file=sys.stderr)
 
 if __name__ == '__main__':
     main() 

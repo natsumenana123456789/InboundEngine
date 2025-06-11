@@ -6,8 +6,8 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Dict
 
-from ..config import AppConfig
-from ..utils.logging_utils import get_logger
+from .config import AppConfig
+from .utils.logging_utils import get_logger
 from .spreadsheet_manager import SpreadsheetManager
 from .discord_notifier import DiscordNotifier
 from .scheduler.scheduled_post_executor import ScheduledPostExecutor
