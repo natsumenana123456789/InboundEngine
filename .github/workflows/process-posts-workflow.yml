@@ -49,11 +49,27 @@ jobs:
         echo "Secret APP_CONFIG_JSON has been written to .github/secrets/app_config.json"
 
     - name: Execute post processing
+      id: post_process # IDを追加して後で参照できるようにする
       run: python main.py --process --config .github/secrets/app_config.json
+    
+    - name: Extract Discord Webhook URL for failure notification
+      # 投稿プロセスが失敗した場合にのみ実行
+      if: failure() && steps.post_process.outcome == 'failure'
+      id: extract_discord_url
+      run: |
+        # config.pyのget_discord_webhook_urlの実装に合わせて "common.discord.webhook_url" をキーとして抽出
+        URL=$(jq -r '.common.discord.webhook_url' .github/secrets/app_config.json)
+        if [ -z "$URL" ] || [ "$URL" == "null" ]; then
+          echo "::warning::Discord Webhook URL not found in APP_CONFIG_JSON. Failure notification cannot be sent."
+          echo "webhook_url=" >> $GITHUB_OUTPUT
+        else
+          echo "webhook_url=$URL" >> $GITHUB_OUTPUT
+        fi
 
     - name: Discord Notification on Failure
-      if: failure()
+      if: failure() # 失敗した場合に実行する
       uses: tsickert/discord-webhook@v5.3.0
       with:
-        webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL_FAILURE }} # 失敗通知用
+        # 抽出したURLを使い、なければ何も送らない
+        webhook-url: ${{ steps.extract_discord_url.outputs.webhook_url }}
         content: "❌ Post Processing Failed: ${{ github.workflow }} / ${{ github.job }} on ${{ github.ref }}" 
