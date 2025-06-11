@@ -94,15 +94,19 @@ def _delete_manual_test_executed_log(executed_log_path: str):
 # --- ここまでヘルパー関数 ---
 
 def main():
-    config_instance = Config()
+    # --- 引数パーサーの設定 ---
+    parser = argparse.ArgumentParser(description="Twitter自動投稿ボット")
     
-    log_level_str = config_instance.get_log_level()
-    numeric_log_level = getattr(logging, log_level_str.upper(), logging.INFO)
-    logging.basicConfig(level=numeric_log_level,
-                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    logger.info(f"Configから取得したログレベル '{log_level_str}' を設定しました。")
-
-    parser = argparse.ArgumentParser(description="Twitter自動投稿システム")
+    # デフォルトの設定ファイルパス
+    default_config_path = "config/app_config.dev.json"
+    
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=default_config_path,
+        help=f"使用する設定ファイルのパス (デフォルト: {default_config_path})"
+    )
+    
     parser.add_argument(
         "--process",
         action="store_true",
@@ -124,9 +128,21 @@ def main():
 
     args = parser.parse_args()
 
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-        logger.info("デバッグログモードが有効になりました (コマンドライン引数により上書き)。")
+    # --- ロギング設定 ---
+    try:
+        # 指定された設定ファイルを使用
+        config = Config(config_path=args.config)
+        log_level_str = config.get_log_level()
+        numeric_log_level = getattr(logging, log_level_str.upper(), logging.INFO)
+        logging.basicConfig(level=numeric_log_level,
+                            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        logger.info(f"Configから取得したログレベル '{log_level_str}' を設定しました。")
+    except FileNotFoundError:
+        print(f"エラー: 指定された設定ファイルが見つかりません: {args.config}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"設定ファイルの読み込み中にエラーが発生しました: {e}")
+        sys.exit(1)
     
     logger.info("システムメイン処理を開始します。")
 
@@ -139,7 +155,7 @@ def main():
         exit(0)
 
     try:
-        workflow_manager = WorkflowManager(config=config_instance)
+        workflow_manager = WorkflowManager(config=config)
         
         if args.process:
             logger.info("モード: --process (司令塔)")
