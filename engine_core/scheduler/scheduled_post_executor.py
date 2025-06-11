@@ -2,10 +2,10 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
-from .config import AppConfig
-from .utils.logging_utils import get_logger
-from .spreadsheet_manager import SpreadsheetManager
-from .twitter_client import TwitterClient
+from ..config import Config
+from ..utils.logging_utils import get_logger
+from ..spreadsheet_manager import SpreadsheetManager
+from ..twitter_client import TwitterClient
 
 logger = get_logger(__name__)
 
@@ -14,7 +14,7 @@ class ScheduledPostExecutor:
     1件の投稿処理（スプレッドシートからの記事取得、投稿、ステータス更新）を
     担当するクラス。
     """
-    def __init__(self, config: AppConfig, spreadsheet_manager: SpreadsheetManager):
+    def __init__(self, config: Config, spreadsheet_manager: SpreadsheetManager):
         self.config = config
         self.spreadsheet_manager = spreadsheet_manager
         self.twitter_clients: Dict[str, TwitterClient] = {}
