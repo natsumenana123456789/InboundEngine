@@ -162,10 +162,10 @@ def main():
         if str(project_root) not in sys.path:
             sys.path.insert(0, str(project_root))
 
-        from engine_core.config import AppConfig
+        from engine_core.config import Config
         from engine_core.workflow_manager import WorkflowManager
 
-        config = AppConfig(config_path=args.config)
+        config = Config(config_path=args.config)
         manager = WorkflowManager(config=config)
 
         if args.process:

@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from typing import Dict
 
-from .config import AppConfig
+from .config import Config
 from .utils.logging_utils import get_logger
 from .spreadsheet_manager import SpreadsheetManager
 from .discord_notifier import DiscordNotifier
@@ -19,7 +19,7 @@ class WorkflowManager:
     投稿ワークフロー全体を管理するクラス。
     司令塔として機能し、投稿タイミングの判断、ワーカープロセスの起動、通知を行う。
     """
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: Config):
         self.config = config
         self.logs_dir = self.config.get("common.logs_directory", "logs")
         os.makedirs(self.logs_dir, exist_ok=True)

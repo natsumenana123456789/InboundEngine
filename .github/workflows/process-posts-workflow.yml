@@ -57,8 +57,8 @@ jobs:
       if: failure() && steps.post_process.outcome == 'failure'
       id: extract_discord_url
       run: |
-        # config.pyのget_discord_webhook_urlの実装に合わせて "common.discord.webhook_url" をキーとして抽出
-        URL=$(jq -r '.common.discord.webhook_url' .github/secrets/app_config.json)
+        # config.pyのget_discord_webhook_urlの実装に合わせて "discord_webhook_url" をキーとして抽出
+        URL=$(jq -r '.discord_webhook_url' .github/secrets/app_config.json)
         if [ -z "$URL" ] || [ "$URL" == "null" ]; then
           echo "::warning::Discord Webhook URL not found in APP_CONFIG_JSON. Failure notification cannot be sent."
           echo "webhook_url=" >> $GITHUB_OUTPUT
