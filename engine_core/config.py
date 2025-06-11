@@ -167,7 +167,8 @@ class Config:
     def get_active_twitter_account_details(self, account_id: str) -> Optional[Dict[str, Any]]:
         accounts = self.get_active_twitter_accounts()
         for acc in accounts:
-            if acc.get("account_id") == account_id:
+            # 比較前に両方を小文字に変換
+            if acc.get("account_id", "").lower() == account_id.lower():
                 required_keys = ["consumer_key", "consumer_secret", "access_token", "access_token_secret"]
                 missing_keys = [key for key in required_keys if not acc.get(key) or not isinstance(acc.get(key), str)]
                 if missing_keys:
@@ -311,9 +312,9 @@ if __name__ == '__main__':
     # このシナリオでは、Configクラスが config/app_config.dev.json を探しに行くが、
     # テストコードはそれを作成しないので、ユーザーが作成したものがもしあればそれが読まれる。
     # ただし、テストとしては「何もない状態」をシミュレートしたいので、
-    # もしユーザーの config/app_config.dev.json が存在すると、このテストシナリオ1の純粋性が損なわれる。
-    # より厳密にするなら、テスト実行前にユーザーのファイルも一時的にリネームするなどの工夫が必要だが、
-    # ここではテスト専用ファイルに影響を与えないことを主眼とする。
+    # もしあれば、その内容次第で以下のassertは失敗する可能性がある。
+    # ここでは、テストコードがユーザーのファイルを削除しないことを優先し、
+    # シナリオ1の完全な独立性は少し犠牲になる。
     logger.info("[Test Scenario 1] No config source (relies on no app_config.dev.json existing or APP_CONFIG_JSON being unset outside this test)...")
     config1 = Config() 
     # シナリオ1の検証は、ユーザーの環境に app_config.dev.json が *ない* ことを前提とする。

@@ -193,3 +193,6 @@ config/config.yml
 
 # Local only twitter accounts file
 config/local_twitter_accounts.json
+
+# Local development settings
+config/app_config.dev.json

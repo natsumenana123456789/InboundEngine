@@ -226,8 +226,6 @@ class WorkflowManager:
 
         logger.info(f"投稿処理を実行します: Account='{account_id}', Worksheet='{worksheet_name}'")
         
-        # ScheduledPostExecutorが期待する形式でデータを作成
-        # scheduled_timeはこのワーカーの実行時刻とする
         scheduled_post = {
             "account_id": account_id,
             "scheduled_time": datetime.now(timezone.utc),
@@ -293,14 +291,33 @@ class WorkflowManager:
         try:
             tweet_id = self.post_executor.execute_post(scheduled_post)
             if tweet_id:
+                success_message = f"Tweet ID: `{tweet_id}`\nhttps://twitter.com/user/status/{tweet_id}"
                 print(f"\n✅ テスト投稿成功！")
                 print(f"   アカウント: {account_id}")
                 print(f"   投稿URL: https://twitter.com/user/status/{tweet_id}")
+                if self.notifier:
+                    self.notifier.send_simple_notification(
+                        title=f"✅ [Test] 投稿成功: `{account_id}`",
+                        description=success_message,
+                        color=0x3498DB # Blue
+                    )
             else:
                 print(f"\n✅ テスト処理は完了しましたが、投稿は実行されませんでした（投稿可能な記事がなかった可能性があります）。")
+                if self.notifier:
+                    self.notifier.send_simple_notification(
+                        title=f"🤔 [Test] 投稿スキップ: `{account_id}`",
+                        description="投稿可能な記事が見つからなかったため、今回の処理はスキップされました。",
+                        color=0xF1C40F # Yellow
+                    )
 
         except Exception as e:
             logger.error(f"手動テスト投稿中にエラーが発生しました: {e}", exc_info=True)
             print(f"\n❌ テスト投稿中にエラーが発生しました。詳細はログファイルを確認してください。")
+            if self.notifier:
+                self.notifier.send_simple_notification(
+                    title=f"⚠️ [Test] 処理失敗: `{account_id}`",
+                    description=f"手動テスト投稿処理でエラーが発生しました。\n`{str(e)}`",
+                    color=0xE74C3C # Red
+                )
         finally:
-            logger.info(f"--- 手動テスト投稿完了 (アカウントID: {account_id}) ---") 
+            logger.info(f"--- 手動テスト投稿完了 (アカウントID: {account_id}) ---")
