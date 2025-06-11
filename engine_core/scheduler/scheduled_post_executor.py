@@ -33,6 +33,7 @@ class ScheduledPostExecutor:
         try:
             # 1. 投稿内容をスプレッドシートから取得
             post_content = self.spreadsheet_manager.get_post_candidate(worksheet_name)
+            logger.info(f"取得した投稿候補の内容: {post_content}")
 
             if not post_content:
                 logger.warning(f"アカウント '{account_id}' のワークシート '{worksheet_name}' に投稿可能な記事がありませんでした。処理をスキップします。")
@@ -57,11 +58,17 @@ class ScheduledPostExecutor:
             logger.info(f"アカウント'{account_id}' でツイートを投稿します...")
             logger.debug(f"投稿内容: Text='{post_content['text']}', Media='{post_content.get('media_path')}'")
             
-            tweet_id = client.post_tweet(
+            # post_tweet は media_path を受け取らないため、post_with_media_url を使用する
+            tweet_response = client.post_with_media_url(
                 text=post_content["text"],
-                media_path=post_content.get("media_path")
+                media_url=post_content.get("media_path")
             )
             
+            if not tweet_response or 'id' not in tweet_response:
+                # 投稿失敗のケース。post_with_media_url 内でエラーログは出力されているはず。
+                raise Exception(f"アカウント '{account_id}' の投稿に失敗しました。レスポンス: {tweet_response}")
+
+            tweet_id = tweet_response['id']
             logger.info(f"アカウント '{account_id}' の投稿が成功しました。Tweet ID: {tweet_id}")
 
             # 4. 投稿済みとしてスプレッドシートを更新

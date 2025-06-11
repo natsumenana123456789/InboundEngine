@@ -115,7 +115,7 @@ class SpreadsheetManager:
                 candidates.append({
                     "id": str(record.get(self.columns[self._get_column_index("ID") -1], '')),
                     "text": str(record.get(self.columns[self._get_column_index("本文") -1], '')),
-                    "media_url": str(record.get(self.columns[self._get_column_index("画像/動画URL")-1], '')),
+                    "media_path": str(record.get(self.columns[self._get_column_index("画像/動画URL")-1], '')),
                     "last_posted_at": last_posted_dt,
                     "row_index": i + 2  # スプレッドシートの行番号 (ヘッダーが1行目なので+2)
                 })
@@ -262,7 +262,7 @@ if __name__ == '__main__':
                 candidate = manager.get_post_candidate(target_worksheet_name)
 
                 if candidate:
-                    logger.info(f"取得した投稿候補: ID={candidate['id']}, Text='{candidate['text'][:30]}...', Media='{candidate['media_url']}', Row={candidate['row_index']}")
+                    logger.info(f"取得した投稿候補: ID={candidate['id']}, Text='{candidate['text'][:30]}...', Media='{candidate['media_path']}', Row={candidate['row_index']}")
                     now_utc = datetime.now(timezone.utc)
                     success = manager.update_post_status(target_worksheet_name, candidate['row_index'], now_utc)
                     if success:

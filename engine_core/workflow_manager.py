@@ -238,9 +238,21 @@ class WorkflowManager:
             tweet_id = self.post_executor.execute_post(scheduled_post)
             if tweet_id:
                 logger.info(f"ワーカー処理成功。アカウント '{account_id}' の投稿が完了しました。Tweet ID: {tweet_id}")
+                if self.notifier:
+                    self.notifier.send_simple_notification(
+                        title=f"✅ 投稿成功: `{account_id}`",
+                        description=f"Tweet ID: `{tweet_id}`",
+                        color=0x3498DB # Blue
+                    )
             else:
                 # 投稿に至らなかった場合（例：投稿可能な記事がない）
                 logger.warning(f"ワーカー処理は正常に完了しましたが、アカウント '{account_id}' の投稿は実行されませんでした（条件未達）。")
+                if self.notifier:
+                    self.notifier.send_simple_notification(
+                        title=f"🤔 投稿スキップ: `{account_id}`",
+                        description="投稿可能な記事が見つからなかったため、今回の処理はスキップされました。",
+                        color=0xF1C40F # Yellow
+                    )
         except Exception as e:
             logger.error(f"ワーカー処理中に予期せぬエラーが発生しました (アカウント: {account_id}): {e}", exc_info=True)
             if self.notifier:
