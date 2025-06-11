@@ -1,0 +1,60 @@
+{
+    "common": {
+        "log_level": "INFO",
+        "logs_directory": "logs"
+    },
+    "google_sheets": {
+        "spreadsheet_id": "YOUR_SPREADSHEET_ID_HERE",
+        "service_account_credentials": {
+            "type": "service_account",
+            "project_id": "your-gcp-project-id",
+            "private_key_id": "your-private-key-id",
+            "private_key": "-----BEGIN PRIVATE KEY-----\\nYOUR_PRIVATE_KEY_HERE\\n-----END PRIVATE KEY-----\\n",
+            "client_email": "your-service-account-email@your-project.iam.gserviceaccount.com",
+            "client_id": "your-client-id",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account-email.iam.gserviceaccount.com",
+            "universe_domain": "googleapis.com"
+        }
+    },
+    "twitter_accounts": [
+        {
+            "account_id": "example_account_1",
+            "enabled": true,
+            "consumer_key": "YOUR_CONSUMER_KEY",
+            "consumer_secret": "YOUR_CONSUMER_SECRET",
+            "access_token": "YOUR_ACCESS_TOKEN",
+            "access_token_secret": "YOUR_ACCESS_TOKEN_SECRET",
+            "google_sheets_source": {
+                "worksheet_name": "SheetForAccount1"
+            },
+            "posts_today": 5
+        }
+    ],
+    "discord_webhook_url": "YOUR_DISCORD_WEBHOOK_URL_HERE",
+    "auto_post_bot": {
+        "columns": [
+            "ID",
+            "本文",
+            "文字数",
+            "画像/動画URL",
+            "最終投稿日時",
+            "投稿可能",
+            "投稿済み回数"
+        ],
+        "schedule_settings": {
+            "post_interval_hours": 3,
+            "last_post_times_file": "last_post_times.json",
+            "executed_file": "executed_posts.log",
+            "test_executed_file": "test_executed_posts.log"
+        },
+        "posting_settings": {
+            "posts_per_account": 5
+        },
+        "discord_notification": {
+            "notify_daily_schedule_summary": true
+        }
+    }
+} 
