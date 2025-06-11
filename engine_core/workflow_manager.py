@@ -249,6 +249,8 @@ class WorkflowManager:
                     description=f"アカウント `{account_id}` の投稿処理でエラーが発生しました。詳細はログを確認してください。",
                     color=0xE74C3C # Red
                 )
+            # エラーを再送出し、呼び出し元（main.py）に失敗を伝播させる
+            raise
         finally:
             logger.info(f"--- ワーカー完了 (アカウントID: {account_id}) ---")
 
