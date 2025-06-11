@@ -40,7 +40,17 @@ class ScheduledPostExecutor:
 
             # 2. Twitterクライアントを初期化（アカウントごとに初回のみ）
             if account_id not in self.twitter_clients:
-                self.twitter_clients[account_id] = TwitterClient(self.config, account_id)
+                account_details = self.config.get_active_twitter_account_details(account_id)
+                if not account_details:
+                    raise ValueError(f"アカウント '{account_id}' の設定情報（APIキーなど）が見つからないか、無効です。")
+
+                self.twitter_clients[account_id] = TwitterClient(
+                    consumer_key=account_details["consumer_key"],
+                    consumer_secret=account_details["consumer_secret"],
+                    access_token=account_details["access_token"],
+                    access_token_secret=account_details["access_token_secret"],
+                    bearer_token=account_details.get("bearer_token") # 任意
+                )
             client = self.twitter_clients[account_id]
 
             # 3. 投稿を実行
