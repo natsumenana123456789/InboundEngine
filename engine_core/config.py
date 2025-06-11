@@ -73,7 +73,6 @@ class Config:
             )
             self._config_data = {}
 
-    @lru_cache(maxsize=None)
     def get(self, key: str, default: Any = None) -> Any:
         keys = key.split('.')
         value = self._config_data
@@ -213,10 +212,8 @@ class Config:
             "last_posted_at": "最終投稿日時"
         }
         
-        # 設定ファイルから 'auto_post_bot.spreadsheet_columns' を辞書として取得
         config_columns = self.get("auto_post_bot.spreadsheet_columns")
         
-        # config_columns が辞書であることを確認し、そうであればデフォルトを更新
         if isinstance(config_columns, dict):
             default_columns.update(config_columns)
             logger.info(f"設定ファイルから読み込んだ列定義でデフォルトを更新しました。")
