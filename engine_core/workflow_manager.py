@@ -4,24 +4,22 @@ import json
 import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional
+from typing import Dict
 
-from .config import Config
+from ..config import AppConfig
+from ..utils.logging_utils import get_logger
+from .spreadsheet_manager import SpreadsheetManager
 from .discord_notifier import DiscordNotifier
 from .scheduler.scheduled_post_executor import ScheduledPostExecutor
-from .spreadsheet_manager import SpreadsheetManager
-from .scheduler.post_scheduler import ScheduledPost
 
-
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 class WorkflowManager:
     """
     投稿ワークフロー全体を管理するクラス。
     司令塔として機能し、投稿タイミングの判断、ワーカープロセスの起動、通知を行う。
     """
-    def __init__(self, config: Config):
+    def __init__(self, config: AppConfig):
         self.config = config
         self.logs_dir = self.config.get("common.logs_directory", "logs")
         os.makedirs(self.logs_dir, exist_ok=True)
@@ -134,6 +132,9 @@ class WorkflowManager:
             self._notify_status_to_discord(accounts_to_post, active_accounts)
             
         # ワーカープロセスを起動
+        project_root = os.path.dirname(sys.argv[0]) # main.pyの場所を基準とする
+        main_py_path = os.path.join(project_root, "main.py")
+
         for account in accounts_to_post:
             account_id = account["account_id"]
             try:
@@ -141,7 +142,7 @@ class WorkflowManager:
                 # subprocess.Popenから.runに変更し、GitHub Actions上でワーカーが確実に実行完了するのを待つ
                 command = [
                     sys.executable, 
-                    "main.py", 
+                    main_py_path, 
                     "--config", 
                     self.config.config_path, # 親プロセスが使用したconfigパスをワーカーに引き継ぐ
                     "--worker", 
@@ -149,9 +150,13 @@ class WorkflowManager:
                 ]
                 logger.info(f"ワーカープロセスを起動します: `{' '.join(command)}`")
                 # check=Trueで、ワーカーがエラー終了した場合に例外を発生させる
-                subprocess.run(command, check=True) 
+                subprocess.run(command, check=True, capture_output=True, text=True) 
+            except subprocess.CalledProcessError as e:
+                 logger.error(f"ワーカープロセス `main.py --worker {account_id}` がエラーで終了しました (終了コード: {e.returncode})", exc_info=False)
+                 logger.error(f"ワーカーの標準出力:\n{e.stdout}")
+                 logger.error(f"ワーカーの標準エラー出力:\n{e.stderr}")
             except Exception as e:
-                logger.error(f"ワーカープロセス `main.py --worker {account_id}` の実行に失敗: {e}", exc_info=True)
+                logger.error(f"ワーカープロセス `main.py --worker {account_id}` の起動自体に失敗: {e}", exc_info=True)
                 # 失敗しても次のアカウントの処理は続ける
 
         logger.info(f"すべてのワーカー ({len(accounts_to_post)}件) の処理が完了しました。司令塔プロセスを終了します。")
@@ -223,7 +228,7 @@ class WorkflowManager:
         
         # ScheduledPostExecutorが期待する形式でデータを作成
         # scheduled_timeはこのワーカーの実行時刻とする
-        scheduled_post: ScheduledPost = {
+        scheduled_post = {
             "account_id": account_id,
             "scheduled_time": datetime.now(timezone.utc),
             "worksheet_name": worksheet_name
@@ -236,7 +241,6 @@ class WorkflowManager:
             else:
                 # 投稿に至らなかった場合（例：投稿可能な記事がない）
                 logger.warning(f"ワーカー処理は正常に完了しましたが、アカウント '{account_id}' の投稿は実行されませんでした（条件未達）。")
-                # このケースではエラー通知は不要かもしれないので、ログレベルをWarningに留める
         except Exception as e:
             logger.error(f"ワーカー処理中に予期せぬエラーが発生しました (アカウント: {account_id}): {e}", exc_info=True)
             if self.notifier:
@@ -250,61 +254,39 @@ class WorkflowManager:
 
     def run_manual_test_post(self, account_id: str):
         """
-        [手動テスト機能] 指定されたアカウントで投稿を1回実行する。最終投稿時刻は更新しない。
+        [手動テスト機能] 指定されたアカウントで投稿を一件テスト実行する。
+        時刻のチェックなどをスキップする。
         """
-        logger.info(f"--- 手動テストモード開始 (アカウントID: {account_id}) ---")
-
-        if self.notifier:
-            self.notifier.send_simple_notification(
-                title=f"🧪 手動テスト実行",
-                description=f"アカウント `{account_id}` のテスト投稿を開始します。",
-                color=0xFFA500 # Orange
-            )
-
+        logger.info(f"--- 手動テスト投稿開始 (アカウントID: {account_id}) ---")
         account_details = self.config.get_active_twitter_account_details(account_id)
         if not account_details:
-            logger.error(f"手動テスト失敗: 指定されたアカウントID '{account_id}' が見つからないか、無効化されています。")
-            return
-
-        worksheet_name = account_details.get("spreadsheet_worksheet")
-        if not worksheet_name:
-            logger.error(f"手動テスト失敗: アカウント '{account_id}' にワークシート名が設定されていません。")
+            logger.error(f"テスト投稿失敗: アカウントID '{account_id}' が見つからないか、無効です。")
             return
             
+        worksheet_name = account_details.get("spreadsheet_worksheet")
+        if not worksheet_name:
+            logger.error(f"テスト投稿失敗: アカウント '{account_id}' にワークシート名が設定されていません。")
+            return
+
         logger.info(f"テスト投稿を実行します: Account='{account_id}', Worksheet='{worksheet_name}'")
         
-        scheduled_post: ScheduledPost = {
+        scheduled_post = {
             "account_id": account_id,
             "scheduled_time": datetime.now(timezone.utc),
             "worksheet_name": worksheet_name
         }
-        
+
         try:
             tweet_id = self.post_executor.execute_post(scheduled_post)
             if tweet_id:
-                logger.info(f"手動テスト投稿成功。Tweet ID: {tweet_id}")
-                if self.notifier:
-                    self.notifier.send_simple_notification(
-                        title=f"✅ 手動テスト成功: `{account_id}`",
-                        description=f"テスト投稿が成功しました。Tweet ID: {tweet_id}",
-                        color=0x2ECC71 # Green
-                    )
+                print(f"\n✅ テスト投稿成功！")
+                print(f"   アカウント: {account_id}")
+                print(f"   投稿URL: https://twitter.com/user/status/{tweet_id}")
             else:
-                logger.error("手動テスト投稿に失敗しました。詳細はログを確認してください。")
-                if self.notifier:
-                    self.notifier.send_simple_notification(
-                        title=f"❌ 手動テスト失敗: `{account_id}`",
-                        description=f"テスト投稿に失敗しました。投稿可能な記事がなかったか、APIエラーが発生した可能性があります。",
-                        color=0xE74C3C # Red
-                    )
+                print(f"\n✅ テスト処理は完了しましたが、投稿は実行されませんでした（投稿可能な記事がなかった可能性があります）。")
+
         except Exception as e:
-            logger.error(f"手動テスト中に予期せぬエラーが発生しました (アカウント: {account_id}): {e}", exc_info=True)
-            if self.notifier:
-                self.notifier.send_simple_notification(
-                    title=f"💥 手動テストで例外発生: `{account_id}`",
-                    description=f"詳細はログを確認してください。",
-                    color=0x992D22 # Dark Red
-                )
+            logger.error(f"手動テスト投稿中にエラーが発生しました: {e}", exc_info=True)
+            print(f"\n❌ テスト投稿中にエラーが発生しました。詳細はログファイルを確認してください。")
         finally:
-            logger.info("最終投稿時刻ファイルは更新されませんでした（テストモードのため）。")
-            logger.info(f"--- 手動テストモード完了 (アカウントID: {account_id}) ---") 
+            logger.info(f"--- 手動テスト投稿完了 (アカウントID: {account_id}) ---") 
