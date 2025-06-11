@@ -7,21 +7,20 @@ import os
 from datetime import datetime, date, timedelta, timezone
 import sys
 import json
+from pathlib import Path
 
-# engine_core パッケージのモジュールをインポートするために、
-# プロジェクトルートを sys.path に追加
-project_root_path = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, project_root_path)
+# --- パス設定 ---
+# main.pyがプロジェクトルートにあることを前提とする
+# このスクリプトの場所を絶対パスで取得し、それをプロジェクトルートとする
+project_root = Path(__file__).resolve().parent
+# Pythonがプロジェクト内のモジュールを見つけられるように、sys.pathに追加
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-
-try:
-    from engine_core.config import Config
-    from engine_core.workflow_manager import WorkflowManager
-except ImportError as e: 
-    print(f"ERROR: engine_coreモジュールが見つかりません。PYTHONPATHを確認するか、プロジェクトルートから実行してください。詳細: {e}")
-    print(f"現在のsys.path: {sys.path}")
-    print("例: `python main.py` (プロジェクトルートにいる場合)")
-    exit(1)
+# パス設定後、必要なモジュールをインポート
+from engine_core.utils.file_utils import get_project_root # これはもう不要かもしれないが、念のため
+from engine_core.config import Config
+from engine_core.workflow_manager import WorkflowManager
 
 # ロガーのグローバル設定は main() の中で Config からレベルを取得した後に行う
 logger = logging.getLogger(__name__) 
@@ -155,16 +154,7 @@ def main():
         exit(0)
 
     try:
-        # (重要) このファイルが engine_core の外にあるため、
-        # engine_core をパッケージとして正しく認識させるために
-        # プロジェクトルートをPythonのモジュール検索パスに追加する
-        project_root = get_project_root()
-        if str(project_root) not in sys.path:
-            sys.path.insert(0, str(project_root))
-
-        from engine_core.config import Config
-        from engine_core.workflow_manager import WorkflowManager
-
+        # AppConfigの初期化はここで行う
         config = Config(config_path=args.config)
         manager = WorkflowManager(config=config)
 
