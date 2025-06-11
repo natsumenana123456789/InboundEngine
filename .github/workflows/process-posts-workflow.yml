@@ -59,7 +59,29 @@ jobs:
     - name: Execute post processing
       id: post_process # IDを追加して後で参照できるようにする
       run: python main.py --process --config .github/secrets/app_config.json
-    
+
+    - name: Commit and push last_post_times.json
+      run: |
+        # logs/last_post_times.jsonが存在するか確認
+        if [ ! -f "logs/last_post_times.json" ]; then
+          echo "logs/last_post_times.json not found. No changes to commit."
+          exit 0
+        fi
+        
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+        
+        # ファイルに変更があったか確認
+        if git diff --quiet logs/last_post_times.json; then
+          echo "No changes detected in logs/last_post_times.json. Nothing to commit."
+          exit 0
+        fi
+        
+        git add logs/last_post_times.json
+        # [skip ci] をメッセージに含めると、このコミット自身がワークフローをトリガーするのを防げる
+        git commit -m "chore(logs): Update last_post_times.json [skip ci]"
+        git push
+
     - name: Extract Discord Webhook URL for failure notification
       # 投稿プロセスが失敗した場合にのみ実行
       if: failure() && steps.post_process.outcome == 'failure'
