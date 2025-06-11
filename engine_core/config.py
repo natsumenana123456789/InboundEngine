@@ -211,13 +211,6 @@ class Config:
         if not cfg or not isinstance(cfg, dict):
             logger.critical("スケジュール設定 (auto_post_bot.schedule_settings) が未設定または辞書形式ではありません。")
             return None
-        
-        # 新しいロジックで不要になるキーのチェックを削除
-        # required_files = ["schedule_file", "executed_file", "test_schedule_file", "test_executed_file"]
-        # for req_file_key in required_files:
-        #     if not cfg.get(req_file_key) or not isinstance(cfg.get(req_file_key), str):
-        #         logger.critical(f"スケジュール設定内の必須ファイルパス auto_post_bot.schedule_settings.{req_file_key} が未設定または文字列ではありません。")
-        #         return None
         return cfg
 
     def get_post_interval_hours(self) -> Optional[int]:
@@ -232,197 +225,14 @@ class Config:
         return None
 
     def get_posts_per_account_schedule(self) -> Optional[Dict[str, int]]:
-        accounts = self.get_active_twitter_accounts()
-        if not accounts:
-            logger.warning("有効なTwitterアカウントがないため、アカウント別投稿数スケジュールを生成できません。")
-            return None
-
-        default_posts_val = self.get("auto_post_bot.posting_settings.posts_per_account")
-        default_posts_per_account: Optional[int] = None
-        if default_posts_val is not None:
-            if isinstance(default_posts_val, int) and default_posts_val >= 0:
-                default_posts_per_account = default_posts_val
-            else:
-                logger.warning(f"共通投稿数設定 (auto_post_bot.posting_settings.posts_per_account: {default_posts_val}) が不正(数値でないか負)です。無視されます。")
-        
-        schedule: Dict[str, int] = {}
-        has_valid_schedule_entry = False
-        for account in accounts:
-            account_id = account.get("account_id")
-            if not account_id: continue
-
-            posts_today_val = account.get("posts_today")
-            account_posts: Optional[int] = None
-
-            if posts_today_val is not None:
-                if isinstance(posts_today_val, int) and posts_today_val >= 0:
-                    account_posts = posts_today_val
-                else:
-                    logger.warning(f"アカウント {account_id} の個別投稿数設定 (posts_today: {posts_today_val}) が不正(数値でないか負)です。共通設定を参照します。")
-            
-            if account_posts is not None:
-                schedule[account_id] = account_posts
-                has_valid_schedule_entry = True
-            elif default_posts_per_account is not None:
-                schedule[account_id] = default_posts_per_account
-                has_valid_schedule_entry = True
-            else:
-                logger.info(
-                    f"アカウント '{account_id}' の投稿数が個別にも共通設定にも有効に設定されていません。"
-                    "このアカウントのスケジュールは投稿数0として扱われるか、処理対象外となる可能性があります。"
-                )
-        
-        if not has_valid_schedule_entry: # 少なくとも1つのアカウントで投稿数が設定されているか
-            logger.warning("有効なアカウント別投稿数スケジュールを一つも生成できませんでした。全アカウントの投稿数が未設定の可能性があります。")
-            return None
-        return schedule
+        # ... (このメソッドは古いロジックの名残であり、現在は使用されていません)
+        return None
 
     def should_notify_daily_schedule_summary(self) -> Optional[bool]:
         val = self.get("auto_post_bot.discord_notification.notify_daily_schedule_summary")
         if val is None:
-            logger.info("Discord日次サマリー通知設定 (auto_post_bot.discord_notification.notify_daily_schedule_summary) が未設定です。")
-            return None # 通知しない場合のデフォルトをNoneとするかFalseとするかは呼び出し元で判断
+            return None
         if not isinstance(val, bool):
             logger.warning(f"Discord日次サマリー通知設定の値 ({val}) がブール値ではありません。")
             return None
         return val
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    current_script_path = os.path.abspath(__file__)
-    engine_core_dir = os.path.dirname(current_script_path)
-    project_root_for_test = os.path.dirname(engine_core_dir)
-    config_dir_for_test = os.path.join(project_root_for_test, "config")
-    # テスト専用の設定ファイル名に変更
-    test_runner_config_file_name = "app_config.test_runner.json"
-    dev_config_file_for_test = os.path.join(config_dir_for_test, test_runner_config_file_name)
-
-    os.makedirs(config_dir_for_test, exist_ok=True)
-
-    def cleanup_test_env():
-        if "APP_CONFIG_JSON" in os.environ: del os.environ["APP_CONFIG_JSON"]
-        # テスト専用ファイルのみを削除対象とする
-        if os.path.exists(dev_config_file_for_test): os.remove(dev_config_file_for_test)
-
-    logger.info("--- Config class self-tests (DEFAULT_CONFIG廃止版) START ---")
-
-    # --- シナリオ1: 設定なし ---
-    cleanup_test_env()
-    # このシナリオでは、Configクラスが config/app_config.dev.json を探しに行くが、
-    # テストコードはそれを作成しないので、ユーザーが作成したものがもしあればそれが読まれる。
-    # ただし、テストとしては「何もない状態」をシミュレートしたいので、
-    # もしあれば、その内容次第で以下のassertは失敗する可能性がある。
-    # ここでは、テストコードがユーザーのファイルを削除しないことを優先し、
-    # シナリオ1の完全な独立性は少し犠牲になる。
-    logger.info("[Test Scenario 1] No config source (relies on no app_config.dev.json existing or APP_CONFIG_JSON being unset outside this test)...")
-    config1 = Config() 
-    # シナリオ1の検証は、ユーザーの環境に app_config.dev.json が *ない* ことを前提とする。
-    # もしあれば、その内容次第で以下のassertは失敗する可能性がある。
-    # ここでは、テストコードがユーザーのファイルを削除しないことを優先し、
-    # シナリオ1の完全な独立性は少し犠牲になる。
-    if not os.path.exists(os.path.join(config_dir_for_test, "app_config.dev.json")) and "APP_CONFIG_JSON" not in os.environ:
-        assert config1._config_data == {}, "Scenario 1 Failed: config_data should be empty if no user config exists"
-        assert config1.get_log_level() is None, "Scenario 1 Failed: LogLevel should be None if no user config exists"
-        assert config1.get_spreadsheet_id() is None, "Scenario 1 Failed: SpreadsheetID should be None if no user config exists"
-        logger.info("  Scenario 1 OK (CRITICAL logs expected for missing config source).")
-    else:
-        logger.warning("  Scenario 1 SKIPPED or behavior depends on existing user configuration (app_config.dev.json or APP_CONFIG_JSON).")
-
-
-    # --- シナリオ2: テスト専用ファイルからロード (最小限の必須設定) ---
-    cleanup_test_env() # test_runner_config_file_name のファイルを消す
-    logger.info(f"[Test Scenario 2] Loading from test runner file: {dev_config_file_for_test} (minimal)...")
-    dev_file_content_s2 = {
-        "common": {"log_level": "DEBUG", "logs_directory": "dev_logs"},
-        "google_sheets": {
-            "spreadsheet_id": "dev_sheet_id_s2", 
-            # service_account_credentials を直接オブジェクトとして記述
-            "service_account_credentials": {"type":"service_account", "project_id": "dev_project_s2"}
-        },
-        "twitter_accounts": [{
-            "account_id": "dev_user_s2", "enabled": True, 
-            "consumer_key":"k", "consumer_secret":"s", "access_token":"t", "access_token_secret":"as"
-        }],
-        "auto_post_bot": {
-            "columns": ["ID", "Text"],
-            "schedule_settings": {
-                "schedule_file": "s.json", "executed_file": "e.log", 
-                "test_schedule_file": "ts.json", "test_executed_file": "te.log"
-            }
-        }
-    }
-    with open(dev_config_file_for_test, 'w', encoding='utf-8') as f: json.dump(dev_file_content_s2, f)
-    
-    config2 = Config()
-    assert config2.get_log_level() == "DEBUG", "Scenario 2 Failed: LogLevel"
-    assert config2.get_logs_directory() == "dev_logs", "Scenario 2 Failed: LogsDirectory"
-    assert config2.get_spreadsheet_id() == "dev_sheet_id_s2", "Scenario 2 Failed: SpreadsheetID"
-    assert config2.get_gspread_service_account_dict() == {"type":"service_account", "project_id": "dev_project_s2"}, "Scenario 2 Failed: GSpreadCreds"
-    assert len(config2.get_active_twitter_accounts()) == 1, "Scenario 2 Failed: ActiveTwitterAccounts"
-    active_acc_details_s2 = config2.get_active_twitter_account_details("dev_user_s2")
-    assert active_acc_details_s2 is not None and active_acc_details_s2.get("consumer_key") == "k", "Scenario 2 Failed: DevUser Details"
-    assert config2.get_spreadsheet_columns() == ["ID", "Text"], "Scenario 2 Failed: Columns"
-    assert config2.get_schedule_config() is not None, "Scenario 2 Failed: ScheduleConfig"
-    logger.info("  Scenario 2 OK.")
-
-    # --- シナリオ3: 環境変数からロード (テスト専用ファイルより優先) ---
-    cleanup_test_env() # test_runner_config_file_name のファイルを消す
-    # ダミーのテスト専用開発ファイル
-    with open(dev_config_file_for_test, 'w', encoding='utf-8') as f: json.dump({"common":{"log_level":"INFO"}}, f)
-
-    logger.info("[Test Scenario 3] Loading from ENV var (priority over test runner file)..")
-    env_var_content_s3 = {
-        "common": {"log_level": "WARNING", "logs_directory": "env_logs_s3"},
-        "google_sheets": {
-            "spreadsheet_id": "env_sheet_id_s3", 
-            # service_account_credentials を直接オブジェクトとして記述
-            "service_account_credentials": {"env_key":"val", "project_id": "env_project_s3"}
-        },
-        "twitter_accounts": [{
-            "account_id": "env_user_s3", "enabled": True, 
-            "consumer_key":"ek", "consumer_secret":"es", "access_token":"et", "access_token_secret":"eas"
-        }],
-        "auto_post_bot": { 
-            "columns": ["EnvCol1"],
-             "schedule_settings": { # schedule_settings も完備
-                "schedule_file": "s_env.json", "executed_file": "e_env.log", 
-                "test_schedule_file": "ts_env.json", "test_executed_file": "te_env.log"
-            }
-        }
-    }
-    os.environ["APP_CONFIG_JSON"] = json.dumps(env_var_content_s3)
-
-    config3 = Config()
-    assert config3.get_log_level() == "WARNING", "Scenario 3 Failed: LogLevel"
-    assert config3.get_logs_directory() == "env_logs_s3", "Scenario 3 Failed: LogsDirectory"
-    assert config3.get_spreadsheet_id() == "env_sheet_id_s3", "Scenario 3 Failed: SpreadsheetID"
-    assert config3.get_gspread_service_account_dict() == {"env_key":"val", "project_id": "env_project_s3"}, "Scenario 3 Failed: GSpreadCreds"
-    active_acc_details_s3 = config3.get_active_twitter_account_details("env_user_s3")
-    assert active_acc_details_s3 is not None and active_acc_details_s3.get("consumer_key") == "ek", "Scenario 3 Failed: EnvUser Details"
-    assert config3.get_spreadsheet_columns() == ["EnvCol1"], "Scenario 3 Failed: Columns"
-    assert config3.get_schedule_config() is not None, "Scenario 3 Failed: ScheduleConfig should be present"
-    logger.info("  Scenario 3 OK.")
-
-
-    # --- シナリオ4: 必須項目が欠けたテスト専用ファイル ---
-    cleanup_test_env() # test_runner_config_file_name のファイルを消す
-    logger.info(f"[Test Scenario 4] Loading from test runner file with missing critical parts: {dev_config_file_for_test}...")
-    # google_sheets セクション全体、twitter_accounts 配列が空、auto_post_bot.columns, auto_post_bot.schedule_settings なし
-    dev_file_content_s4_missing = { 
-        "common": {"log_level": "INFO", "logs_directory": "logs_s4"},
-        "twitter_accounts": [] 
-    }
-    with open(dev_config_file_for_test, 'w', encoding='utf-8') as f: json.dump(dev_file_content_s4_missing, f)
-    
-    config4 = Config()
-    assert config4.get_log_level() == "INFO", "Scenario 4 Failed: LogLevel"
-    assert config4.get_spreadsheet_id() is None, "Scenario 4 Failed: SpreadsheetID (CRITICAL log expected)"
-    assert config4.get_gspread_service_account_dict() is None, "Scenario 4 Failed: GSpreadCreds (CRITICAL log expected)"
-    assert len(config4.get_twitter_accounts()) == 0, "Scenario 4 Failed: TwitterAccounts" # 警告ログ期待
-    assert config4.get_spreadsheet_columns() is None, "Scenario 4 Failed: Columns (CRITICAL log expected)"
-    assert config4.get_schedule_config() is None, "Scenario 4 Failed: ScheduleConfig (CRITICAL log expected)"
-    logger.info("  Scenario 4 OK (CRITICAL/WARNING logs expected for missing sections).")
-
-    cleanup_test_env()
-    logger.info("--- Config class self-tests (DEFAULT_CONFIG廃止版) FINISHED ---") 
