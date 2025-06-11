@@ -4,7 +4,8 @@ import json
 import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
-from typing import Dict
+from typing import Dict, List, Tuple
+import atexit
 
 from .config import Config
 from .utils.logging_utils import get_logger
@@ -23,6 +24,7 @@ class WorkflowManager:
         self.config = config
         self.logs_dir = self.config.get("common.logs_directory", "logs")
         os.makedirs(self.logs_dir, exist_ok=True)
+        self.lock_file_path = os.path.join(self.logs_dir, "commander.lock")
 
         schedule_settings = self.config.get_schedule_config()
         if not schedule_settings:
@@ -49,6 +51,31 @@ class WorkflowManager:
             logger.info("Discord Webhook URLが設定されていないため、通知は行われません。")
 
         logger.info("WorkflowManager初期化完了。")
+
+    def _acquire_lock(self) -> bool:
+        """ロックファイルを作成して処理の多重実行を防ぐ。"""
+        if os.path.exists(self.lock_file_path):
+            logger.warning("ロックファイルが既に存在します。他の司令塔プロセスが実行中の可能性があります。処理を中止します。")
+            return False
+        try:
+            with open(self.lock_file_path, 'w') as f:
+                f.write(str(os.getpid()))
+            # プロセス終了時にロックファイルを確実に削除する
+            atexit.register(self._release_lock)
+            logger.info(f"ロックを取得しました: {self.lock_file_path}")
+            return True
+        except IOError as e:
+            logger.error(f"ロックファイルの作成に失敗しました: {e}", exc_info=True)
+            return False
+
+    def _release_lock(self):
+        """ロックファイルを削除する。"""
+        if os.path.exists(self.lock_file_path):
+            try:
+                os.remove(self.lock_file_path)
+                logger.info(f"ロックを解放しました: {self.lock_file_path}")
+            except IOError as e:
+                logger.error(f"ロックファイルの削除に失敗しました: {e}", exc_info=True)
 
     def _read_last_post_times(self) -> Dict[str, datetime]:
         """最終投稿時刻を記録したJSONファイルを読み込む。"""
@@ -91,7 +118,11 @@ class WorkflowManager:
     def launch_pending_posts(self):
         """
         [司令塔機能] 投稿時間になったアカウントを検出し、ワーカープロセスを起動する。
+        多重起動を防ぐロック機構と、1実行1投稿の制限を設ける。
         """
+        if not self._acquire_lock():
+            return
+            
         logger.info("司令塔プロセス開始: 投稿時間になったアカウントのワーカーを起動します。")
         
         interval_hours = self.config.get_post_interval_hours()
@@ -107,59 +138,67 @@ class WorkflowManager:
         last_post_times = self._read_last_post_times()
         now_utc = datetime.now(timezone.utc)
         
-        accounts_to_post = []
+        accounts_to_post_candidates: List[Tuple[Dict[str, any], datetime]] = []
         for account in active_accounts:
             account_id = account["account_id"]
-            last_post_time = last_post_times.get(account_id)
+            last_post_time = last_post_times.get(account_id, datetime.min.replace(tzinfo=timezone.utc))
 
-            # 最終投稿時刻がない（初回）か、インターバル時間を超えていれば投稿対象
-            if not last_post_time or now_utc >= last_post_time + timedelta(hours=interval_hours):
-                accounts_to_post.append(account)
+            if now_utc >= last_post_time + timedelta(hours=interval_hours):
+                accounts_to_post_candidates.append((account, last_post_time))
 
-        if not accounts_to_post:
+        if not accounts_to_post_candidates:
             logger.info("現時点で投稿対象となるアカウントはありません。")
-            # 投稿がない場合は通知しない
             return
+
+        # 最終投稿日時が最も古いアカウントを1つだけ選ぶ
+        accounts_to_post_candidates.sort(key=lambda x: x[1])
+        account_to_post, _ = accounts_to_post_candidates[0]
         
-        # 投稿対象アカウントの最終投稿日時を先に更新（ロック）
-        for account in accounts_to_post:
-            last_post_times[account["account_id"]] = now_utc
+        # 投稿対象アカウント（1件）の最終投稿日時を先に更新（ロック）
+        last_post_times[account_to_post["account_id"]] = now_utc
         self._write_last_post_times(last_post_times)
-        logger.info(f"{len(accounts_to_post)}件のアカウントの最終投稿日時を更新しました。")
+        logger.info(f"アカウント '{account_to_post['account_id']}' の最終投稿日時を更新しました。")
 
         # Discord通知
         if self.notifier:
-            self._notify_status_to_discord(accounts_to_post, active_accounts)
+            self._notify_status_to_discord([account_to_post], active_accounts)
             
         # ワーカープロセスを起動
-        project_root = os.path.dirname(sys.argv[0]) # main.pyの場所を基準とする
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         main_py_path = os.path.join(project_root, "main.py")
 
-        for account in accounts_to_post:
-            account_id = account["account_id"]
-            try:
-                # 現在のPythonインタプリタを使ってmain.pyをワーカーとして逐次実行
-                # subprocess.Popenから.runに変更し、GitHub Actions上でワーカーが確実に実行完了するのを待つ
-                command = [
-                    sys.executable, 
-                    main_py_path, 
-                    "--config", 
-                    self.config.config_path, # 親プロセスが使用したconfigパスをワーカーに引き継ぐ
-                    "--worker", 
-                    account_id
-                ]
-                logger.info(f"ワーカープロセスを起動します: `{' '.join(command)}`")
-                # check=Trueで、ワーカーがエラー終了した場合に例外を発生させる
-                subprocess.run(command, check=True, capture_output=True, text=True) 
-            except subprocess.CalledProcessError as e:
-                 logger.error(f"ワーカープロセス `main.py --worker {account_id}` がエラーで終了しました (終了コード: {e.returncode})", exc_info=False)
-                 logger.error(f"ワーカーの標準出力:\n{e.stdout}")
-                 logger.error(f"ワーカーの標準エラー出力:\n{e.stderr}")
-            except Exception as e:
-                logger.error(f"ワーカープロセス `main.py --worker {account_id}` の起動自体に失敗: {e}", exc_info=True)
-                # 失敗しても次のアカウントの処理は続ける
+        account_id = account_to_post["account_id"]
+        try:
+            command = [
+                sys.executable, 
+                main_py_path,
+            ]
+            # 親プロセスがconfigパスを指定されていた場合のみ、ワーカーにも引き継ぐ
+            if self.config.config_path:
+                command.extend(["--config", self.config.config_path])
+            command.extend(["--worker", account_id])
 
-        logger.info(f"すべてのワーカー ({len(accounts_to_post)}件) の処理が完了しました。司令塔プロセスを終了します。")
+            logger.info(f"ワーカープロセスを起動します: `{' '.join(command)}`")
+            
+            # ログをリアルタイムでキャプチャしつつ、ワーカーの完了を待つ
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
+            stdout, stderr = process.communicate()
+
+            if process.returncode != 0:
+                 logger.error(f"ワーカープロセス `main.py --worker {account_id}` がエラーで終了しました (終了コード: {process.returncode})", exc_info=False)
+                 if stdout:
+                     logger.error(f"ワーカーの標準出力:\n{stdout}")
+                 if stderr:
+                     logger.error(f"ワーカーの標準エラー出力:\n{stderr}")
+            else:
+                 logger.info(f"ワーカープロセス `main.py --worker {account_id}` が正常に完了しました。")
+                 if stdout:
+                     logger.info(f"ワーカーの標準出力:\n{stdout}")
+
+        except Exception as e:
+            logger.error(f"ワーカープロセス `main.py --worker {account_id}` の起動自体に失敗: {e}", exc_info=True)
+
+        logger.info("司令塔プロセスを終了します。")
 
     def _notify_status_to_discord(self, accounts_to_post, active_accounts):
         """現在の全アカウントのステータスをDiscordにテーブル形式で通知する。"""
