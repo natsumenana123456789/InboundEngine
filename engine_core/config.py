@@ -50,8 +50,8 @@ class Config:
             except json.JSONDecodeError as e:
                 logger.critical(f"{loaded_config_source} のJSONパースに失敗しました: {e}。設定は空になります。")
                 self._config_data = {}
-        except Exception as e:
-                logger.critical(f"{loaded_config_source} の処理中に予期せぬエラー: {e}。設定は空になります。")
+            except Exception as e:
+                logger.critical(f"{loaded_config_source} のJSONパース処理中に予期せぬエラー: {e}。設定は空になります。")
                 self._config_data = {}
         else:
             logger.critical(
@@ -129,14 +129,14 @@ class Config:
                 logger.warning(f"twitter_accounts 内に辞書でない要素が含まれています: {acc_raw}")
                 continue
             
-            acc = dict(acc_raw) 
-                    if 'enabled' not in acc:
-                        acc['enabled'] = True
+            acc = dict(acc_raw)
+            if 'enabled' not in acc:
+                acc['enabled'] = True
 
             if not acc.get("account_id"):
                 logger.warning(f"twitter_accounts 内のアカウント設定に account_id がありません: {acc}")
                 continue
-                    processed_accounts.append(acc)
+            processed_accounts.append(acc)
         
         if not processed_accounts: # 有効無効に関わらず、リストが空なら警告
             logger.warning("設定ファイルに twitter_accounts が見つからないか、有効なアカウント設定がありません。")
@@ -198,13 +198,18 @@ class Config:
         if not cfg or not isinstance(cfg, dict):
             logger.critical("スケジュール設定 (auto_post_bot.schedule_settings) が未設定または辞書形式ではありません。")
             return None
-        
-        required_files = ["schedule_file", "executed_file", "test_schedule_file", "test_executed_file"]
-        for req_file_key in required_files:
-            if not cfg.get(req_file_key) or not isinstance(cfg.get(req_file_key), str):
-                logger.critical(f"スケジュール設定内の必須ファイルパス auto_post_bot.schedule_settings.{req_file_key} が未設定または文字列ではありません。")
-                return None
         return cfg
+
+    def get_post_interval_hours(self) -> Optional[int]:
+        """投稿間隔を時間単位で取得する。"""
+        interval = self.get("auto_post_bot.schedule_settings.post_interval_hours")
+        if interval is None:
+            logger.warning("投稿間隔 (post_interval_hours) が設定されていません。")
+            return None
+        if isinstance(interval, int) and interval > 0:
+            return interval
+        logger.error(f"投稿間隔 (post_interval_hours: {interval}) の設定が不正です。正の整数である必要があります。")
+        return None
 
     def get_posts_per_account_schedule(self) -> Optional[Dict[str, int]]:
         accounts = self.get_active_twitter_accounts()

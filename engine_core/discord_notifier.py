@@ -130,6 +130,55 @@ class DiscordNotifier:
         
         return self.send_message(embeds=[embed], username=bot_username)
 
+    def send_status_table(self, title: str, headers: List[str], data: List[List[str]], color: int = 0x000000):
+        """
+        ステータス情報をテーブル形式で送信する。
+        :param title: Embedのタイトル
+        :param headers: テーブルのヘッダー (可変長)
+        :param data: テーブルのデータ (各行の要素数はヘッダーと一致させる)
+        :param color: Embedの左側の色
+        """
+        if not self.webhook_url:
+            logger.warning("Discord Webhook URLが設定されていないため、通知をスキップしました。")
+            return
+
+        num_columns = len(headers)
+        if num_columns == 0 or any(len(row) != num_columns for row in data):
+            logger.error(f"テーブル通知のヘッダーまたはデータの形式が不正です。各行の列数はヘッダー({num_columns}列)と一致する必要があります。")
+            return
+
+        embed = {
+            "title": title,
+            "color": color,
+            "fields": [],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        # ヘッダーをフィールドとして追加 (インラインで並べる)
+        for header in headers:
+            embed["fields"].append({"name": f"**{header}**", "value": "\u200b", "inline": True})
+
+        # 各行のデータをフィールドとして追加 (インラインで並べる)
+        for row in data:
+            for i, cell in enumerate(row):
+                # 空のセルでも高さを揃えるためにゼロ幅スペースを入れる
+                value = str(cell) if cell is not None and str(cell).strip() != "" else "\u200b"
+                embed["fields"].append({"name": "\u200b", "value": value, "inline": True})
+        
+        # 3列や4列の場合、最後の要素の後に空のインラインフィールドを追加すると改行が揃うことがある
+        # ただし、Discordのクライアントや表示幅によって挙動が変わるため、常にうまくいくとは限らない
+        # if num_columns % 3 != 0:
+        #    embed["fields"].append({"name": "\u200b", "value": "\u200b", "inline": True})
+
+        payload = {"embeds": [embed]}
+        
+        try:
+            response = requests.post(self.webhook_url, json=payload)
+            response.raise_for_status()
+            logger.info(f"Discord通知成功（テーブル形式）。ステータスコード: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Discord通知（テーブル形式）の送信中にエラーが発生しました: {e}")
+
 if __name__ == '__main__':
     import os # if __name__ 内でのみ使用
 

@@ -1,9 +1,9 @@
 name: Process Scheduled Posts
 
 on:
-  schedule:
+  # schedule:
     # 例: 15分ごとに実行
-    - cron: '*/15 * * * *'
+    # - cron: '*/15 * * * *'
   workflow_dispatch: # 手動実行も可能にしておくとデバッグに便利
 
 jobs:
@@ -43,14 +43,13 @@ jobs:
           echo "::error::Secret APP_CONFIG_JSON is not set or is empty."
           exit 1
         fi
-        delimiter=$(uuidgen)
-        echo "APP_CONFIG_JSON<<${delimiter}" >> $GITHUB_ENV
-        echo "${APP_CONFIG_CONTENT}" >> $GITHUB_ENV
-        echo "${delimiter}" >> $GITHUB_ENV
-        echo "APP_CONFIG_JSON environment variable has been set."
+        # 一時ファイルとして書き出す
+        mkdir -p .github/secrets
+        echo "${APP_CONFIG_CONTENT}" > .github/secrets/app_config.json
+        echo "Secret APP_CONFIG_JSON has been written to .github/secrets/app_config.json"
 
-    - name: Execute scheduled posts
-      run: python main.py --process-now
+    - name: Execute post processing
+      run: python main.py --process --config .github/secrets/app_config.json
 
     - name: Discord Notification on Failure
       if: failure()

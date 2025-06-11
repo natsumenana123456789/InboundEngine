@@ -1,484 +1,310 @@
 import logging
 import os
 import json
-from datetime import datetime, date, timezone, timedelta
-from typing import List, Optional, Dict, Any, Tuple
+import subprocess
+import sys
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Optional
 
 from .config import Config
-from .spreadsheet_manager import SpreadsheetManager
 from .discord_notifier import DiscordNotifier
-from .scheduler.post_scheduler import PostScheduler, ScheduledPost
 from .scheduler.scheduled_post_executor import ScheduledPostExecutor
+from .spreadsheet_manager import SpreadsheetManager
+from .scheduler.post_scheduler import ScheduledPost
+
 
 logger = logging.getLogger(__name__)
 
-# LOGS_DIR は config から取得するので、グローバル定数は不要になるか、デフォルトとしてのみ使用
-# SCHEDULE_FILE_NAME と EXECUTED_LOG_FILE_NAME も同様
 
 class WorkflowManager:
-    def __init__(self, config: Config, schedule_file_path: str):
+    """
+    投稿ワークフロー全体を管理するクラス。
+    司令塔として機能し、投稿タイミングの判断、ワーカープロセスの起動、通知を行う。
+    """
+    def __init__(self, config: Config):
         self.config = config
-        self.logs_dir = self.config.get("common.logs_directory", "logs") # デフォルト値を指定
-        os.makedirs(self.logs_dir, exist_ok=True) # logs_dirの存在確認と作成
+        self.logs_dir = self.config.get("common.logs_directory", "logs")
+        os.makedirs(self.logs_dir, exist_ok=True)
 
-        # 引数で渡されたファイルパスを使用
-        self.schedule_file_path = schedule_file_path
-
-        # executed_log_file_path を Config から取得
         schedule_settings = self.config.get_schedule_config()
-        if schedule_settings and isinstance(schedule_settings.get("executed_file"), str):
-            self.executed_log_file_path = os.path.join(self.logs_dir, schedule_settings["executed_file"])
-        else:
-            logger.warning("Configから実行ログファイルパスが取得できませんでした。デフォルト値を使用します: logs/executed_posts.log")
-            self.executed_log_file_path = os.path.join(self.logs_dir, "executed_posts.log")
-        
-        self._ensure_schedule_file_exists() # schedule_file_path が参照可能であることを確認
+        if not schedule_settings:
+            raise ValueError("Configにスケジュール設定 (schedule_settings) が見つかりません。")
+
+        last_post_times_filename = schedule_settings.get("last_post_times_file")
+        if not last_post_times_filename:
+            raise ValueError("Configに最終投稿時刻ファイル (last_post_times_file) の設定がありません。")
+        self.last_post_times_path = os.path.join(self.logs_dir, last_post_times_filename)
 
         # コアコンポーネントの初期化
         self.spreadsheet_manager = SpreadsheetManager(config=self.config)
-        
-        # PostScheduler と ScheduledPostExecutor の初期化に必要な情報をconfigから取得
-        schedule_settings = self.config.get_schedule_config()
-        if not schedule_settings:
-            msg = "スケジューラ設定 (auto_post_bot.schedule_settings) がconfig.ymlに見つかりません。"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        posts_per_account = self.config.get_posts_per_account_schedule() or {}
-
-        self.post_scheduler = PostScheduler(
-            config=self.config,
-            start_hour=schedule_settings.get("start_hour", 9),
-            end_hour=schedule_settings.get("end_hour", 21),
-            min_interval_minutes=schedule_settings.get("min_interval_minutes", 30),
-            posts_per_account_schedule=posts_per_account,
-            schedule_file_path=self.schedule_file_path, # ここで渡す
-            max_posts_per_hour_globally=schedule_settings.get("max_posts_per_hour_globally")
-        )
         self.post_executor = ScheduledPostExecutor(
             config=self.config,
             spreadsheet_manager=self.spreadsheet_manager
         )
         
-        # DiscordNotifierのインスタンスをここで生成するか、各メソッドで都度生成するか検討
-        # WorkflowManager自体が通知を行う責務を持つなら、ここで初期化するのが自然
-        discord_webhook_url_for_summary = self.config.get_discord_webhook_url() # 全体設定のWebhook URL
-        if discord_webhook_url_for_summary:
-            self.summary_notifier = DiscordNotifier(webhook_url=discord_webhook_url_for_summary)
-            logger.info("WorkflowManager用Discordサマリー通知クライアントを初期化しました。")
+        discord_webhook_url = self.config.get_discord_webhook_url()
+        if discord_webhook_url:
+            self.notifier = DiscordNotifier(webhook_url=discord_webhook_url)
+            logger.info("Discord通知クライアントを初期化しました。")
         else:
-            self.summary_notifier = None
-            logger.info("WorkflowManager用Discordサマリー通知クライアントは初期化されませんでした (Webhook URL未設定)。")
-
-        self.workflow_notifier = self.summary_notifier # ワークフロー完了通知も同じNotifierを使うか検討
+            self.notifier = None
+            logger.info("Discord Webhook URLが設定されていないため、通知は行われません。")
 
         logger.info("WorkflowManager初期化完了。")
 
-    def _ensure_schedule_file_exists(self):
-        if not os.path.exists(self.schedule_file_path):
-            try:
-                with open(self.schedule_file_path, 'w', encoding='utf-8') as f:
-                    json.dump({}, f) # 空のJSONオブジェクトで初期化
-                logger.info(f"スケジュールファイルが存在しなかったため、空のファイルを作成しました: {self.schedule_file_path}")
-            except IOError as e:
-                logger.error(f"空のスケジュールファイルの作成に失敗しました: {self.schedule_file_path}, Error: {e}", exc_info=True)
-                # このエラーは致命的かもしれないので、呼び出し元に伝播させるか、ここで終了させることを検討
-                raise
-
-    def _save_schedule_to_file(self, schedule: List[ScheduledPost], target_date: date):
-        """生成されたスケジュールをファイルにJSON形式で保存する。日付ごとに追記または上書き。"""
-        # 日付をキーとした辞書として保存する
-        full_schedule_data: Dict[str, List[Dict[str, Any]]] = {}
-        if os.path.exists(self.schedule_file_path):
-            try:
-                with open(self.schedule_file_path, 'r', encoding='utf-8') as f:
-                    full_schedule_data = json.load(f)
-            except json.JSONDecodeError:
-                logger.warning(f"既存のスケジュールファイル {self.schedule_file_path} が破損しているようです。上書きします。")
-            except Exception as e:
-                logger.error(f"既存のスケジュールファイル読み込みエラー: {e}", exc_info=True)
-                # エラー時は上書きする
-        
-        # ScheduledPostをJSONシリアライズ可能な形式に変換
-        serializable_schedule = [
-            {
-                "account_id": post["account_id"],
-                "scheduled_time": post["scheduled_time"].isoformat(), # datetimeをISO文字列に
-                "worksheet_name": post["worksheet_name"]
-            }
-            for post in schedule
-        ]
-        
-        full_schedule_data[target_date.isoformat()] = serializable_schedule
-
+    def _read_last_post_times(self) -> Dict[str, datetime]:
+        """最終投稿時刻を記録したJSONファイルを読み込む。"""
+        if not os.path.exists(self.last_post_times_path):
+            return {}
         try:
-            with open(self.schedule_file_path, 'w', encoding='utf-8') as f:
-                json.dump(full_schedule_data, f, ensure_ascii=False, indent=4)
-            logger.info(f"{target_date.isoformat()} のスケジュール ({len(schedule)}件) を {self.schedule_file_path} に保存しました。")
-        except Exception as e:
-            logger.error(f"スケジュールファイルの保存に失敗: {e}", exc_info=True)
-
-    def _load_schedule_from_file(self, target_date: date) -> List[ScheduledPost]:
-        """ファイルから指定された日付のスケジュールを読み込む。"""
-        if not os.path.exists(self.schedule_file_path):
-            logger.info(f"スケジュールファイル {self.schedule_file_path} が存在しません。")
-            return []
-        try:
-            with open(self.schedule_file_path, 'r', encoding='utf-8') as f:
+            with open(self.last_post_times_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                if not content.strip(): # 空ファイルの場合
-                    logger.warning(f"スケジュールファイル {self.schedule_file_path} は空です。")
-                    return []
-                full_schedule_data: Dict[str, List[Dict[str, Any]]] = json.loads(content)
+                if not content:
+                    return {}
+                data = json.loads(content)
             
-            date_str = target_date.isoformat()
-            if date_str not in full_schedule_data:
-                logger.info(f"{date_str} のスケジュールはファイルに存在しません。")
-                return []
-            
-            loaded_schedule_data = full_schedule_data[date_str]
-            # JSONからScheduledPost型に変換
-            schedule: List[ScheduledPost] = []
-            for item_dict in loaded_schedule_data:
+            last_times: Dict[str, datetime] = {}
+            for acc_id, time_str in data.items():
                 try:
-                    time_str = item_dict["scheduled_time"]
-                    # ISOフォーマットの末尾 'Z' を '+00:00' に置換してからパース
-                    if time_str.endswith('Z'):
-                        time_str = time_str[:-1] + '+00:00'
-                    scheduled_time_dt = datetime.fromisoformat(time_str)
-
-                    # タイムゾーン情報がない場合はUTCを強制 (fromisoformatで aware になるはずだが念のため)
-                    if scheduled_time_dt.tzinfo is None:
-                         logger.warning(f"Parsed datetime {scheduled_time_dt} is naive, forcing UTC. Original str: {item_dict['scheduled_time']}")
-                         scheduled_time_dt = scheduled_time_dt.replace(tzinfo=timezone.utc)
-
-                    # ScheduledPost TypedDict を作成
-                    scheduled_post_item: ScheduledPost = {
-                        "account_id": item_dict["account_id"],
-                        "scheduled_time": scheduled_time_dt,
-                        "worksheet_name": item_dict["worksheet_name"],
-                        "text_content_override": item_dict.get("text_content_override") # なければNone
-                    }
-                    schedule.append(scheduled_post_item)
-                except KeyError as e:
-                    logger.warning(f"スケジュール項目の必須キーが不足しています: {e}. Item: {item_dict}. スキップします。")
-                    continue
-                except Exception as e:
-                    logger.warning(f"スケジュール項目のパースに失敗: {item_dict}, Error: {e}. スキップします。")
-                    continue
-            logger.info(f"{date_str} のスケジュール ({len(schedule)}件) を {self.schedule_file_path} から読み込みました。")
-            return schedule
-        except json.JSONDecodeError:
-            logger.error(f"スケジュールファイル {self.schedule_file_path} が破損しています。")
-            return []
-        except Exception as e:
-            logger.error(f"スケジュールファイルの読み込みに失敗: {e}", exc_info=True)
-            return []
-
-    def _log_executed_post(self, scheduled_post: ScheduledPost, success: bool, tweet_id: Optional[str] = None, error_reason: Optional[str] = None):
-        """実行結果をログファイルに追記する。"""
-        # ScheduledPost は TypedDict なので、辞書としてアクセス
-        log_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "account_id": scheduled_post["account_id"],
-            "worksheet_name": scheduled_post["worksheet_name"],
-            "scheduled_time": scheduled_post["scheduled_time"].isoformat(),
-            "success": success,
-            "tweet_id": tweet_id,
-            "error_reason": error_reason,
-            "text_content_override_used": scheduled_post.get("text_content_override") is not None
-        }
-        try:
-            with open(self.executed_log_file_path, 'a', encoding='utf-8') as f:
-                json.dump(log_entry, f, ensure_ascii=False)
-                f.write('\n') # 1行1エントリ
-            logger.debug(f"実行ログ追記: Account={log_entry['account_id']}, Success={success}")
-        except Exception as e:
-            logger.error(f"実行ログの書き込みに失敗: {e}", exc_info=True)
-
-    def generate_daily_schedule(self, target_date: Optional[date] = None, force_regenerate: bool = False, execution_trigger_time_utc: Optional[datetime] = None):
-        """指定された日付（デフォルトは今日）のスケジュールを生成しファイルに保存する。"""
-        if target_date is None:
-            target_date = datetime.now(timezone.utc).date()
-        
-        logger.info(f"{target_date.isoformat()} のスケジュール生成処理を開始します。強制再生成: {force_regenerate}, 実行トリガー時刻UTC: {execution_trigger_time_utc.isoformat() if execution_trigger_time_utc else 'N/A'}")
-        
-        # 強制再生成でない場合、既存のスケジュールがあればそれを使用
-        if not force_regenerate:
-            existing_schedule = self._load_schedule_from_file(target_date)
-            if existing_schedule:
-                logger.info(f"{target_date.isoformat()} の既存スケジュールが見つかったため、再生成をスキップします。")
-                if self.workflow_notifier:
-                    self.workflow_notifier.send_simple_notification(
-                        title=f"🗓️ スケジュール生成スキップ ({target_date.isoformat()})",
-                        description=f"{target_date.isoformat()} のスケジュールは既に存在します。({len(existing_schedule)}件)",
-                        color=0x0000ff # 青色
-                    )
-                return
-
-        schedule = self.post_scheduler.generate_schedule_for_day(target_date, execution_trigger_time_utc=execution_trigger_time_utc)
-        self._save_schedule_to_file(schedule, target_date)
-        if self.workflow_notifier:
-            description_message = f"{target_date.isoformat()} の投稿スケジュールを {len(schedule)} 件生成しました。"
-            if schedule:
-                schedule_details = []
-                jst = timezone(timedelta(hours=9))
-                for post in schedule: # 件数制限を削除
-                    jst_time_str = "時刻不明"
-                    try:
-                        if post["scheduled_time"].tzinfo is None:
-                            scheduled_time_utc = post["scheduled_time"].replace(tzinfo=timezone.utc)
-                        else:
-                            scheduled_time_utc = post["scheduled_time"].astimezone(timezone.utc)
-                        
-                        scheduled_time_jst = scheduled_time_utc.astimezone(jst)
-                        jst_time_str = scheduled_time_jst.strftime('%H:%M')
-                    except Exception as e:
-                        logger.warning(f"Scheduled time to JST conversion error: {e}, for post: {post}")
-
-                    schedule_details.append(
-                        f"- {post['account_id']} ({post['worksheet_name']}) at {jst_time_str} (JST)"
-                    )
-                description_message += "\n\n**スケジュール詳細:**\n" + "\n".join(schedule_details)
-            else:
-                description_message += "\nスケジュールされた投稿はありませんでした。" 
-
-            description_message += "\n\n詳細はログファイルを確認してください。"
-
-            self.workflow_notifier.send_simple_notification(
-                title=f"📅 スケジュール生成完了 ({target_date.isoformat()})",
-                description=description_message,
-                color=0x00ff00 if schedule else 0xffa500 # 投稿があれば緑、なければオレンジ
-            )
-        logger.info(f"{target_date.isoformat()} のスケジュール生成処理を完了しました。")
-
-    def process_scheduled_posts_now(self, target_date: Optional[date] = None, look_back_minutes: int = 15, look_forward_minutes: int = 5):
-        """
-        指定された日付（デフォルトは今日）のスケジュールを読み込み、
-        現在時刻の前後N分以内に予定されている未実行の投稿を実行する。
-        """
-        if target_date is None:
-            target_date = datetime.now(timezone.utc).date()
-
-        logger.info(f"{target_date.isoformat()} のスケジュール投稿処理を開始 (現在時刻ベース)。")
-        schedule = self._load_schedule_from_file(target_date)
-        if not schedule:
-            logger.info(f"{target_date.isoformat()} に実行すべきスケジュールはありません。")
-            # 通知はgenerate時か、別途cronの実行監視で行う想定
-            return
-
-        now_utc = datetime.now(timezone.utc)
-        # 実行済みログから、今日実行成功したタスクのキー(account_id, scheduled_time_iso)セットを取得
-        executed_today_keys = set()
-        if os.path.exists(self.executed_log_file_path):
-            try:
-                with open(self.executed_log_file_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        try:
-                            log_entry = json.loads(line)
-                            # scheduled_timeはISO文字列なので、日付部分で比較
-                            if log_entry.get("success") and log_entry.get("scheduled_time", "").startswith(target_date.isoformat()):
-                                executed_today_keys.add((log_entry["account_id"], log_entry["scheduled_time"]))                                
-                        except json.JSONDecodeError:
-                            logger.debug(f"実行ログの不正な行をスキップ: {line.strip()}") # DEBUGログ追加
-                            continue # 不正な行はスキップ
-            except Exception as e:
-                logger.error(f"実行ログファイルの読み込みエラー: {e}", exc_info=True)
-        
-        logger.debug(f"本日 ({target_date.isoformat()}) 実行済みのタスクキー: {len(executed_today_keys)}件 {executed_today_keys if executed_today_keys else ''}") # DEBUGログ追加
-
-        due_posts_count = 0
-        successful_posts_count = 0
-
-        logger.debug(f"スケジュール処理開始: now_utc={now_utc.isoformat()}, look_back={look_back_minutes}min, look_forward={look_forward_minutes}min") # DEBUGログ追加
-        time_range_start = now_utc - timedelta(minutes=look_back_minutes)
-        time_range_end = now_utc + timedelta(minutes=look_forward_minutes)
-        logger.debug(f"実行対象時間範囲: {time_range_start.isoformat()} から {time_range_end.isoformat()} まで") # DEBUGログ追加
-
-        for i, post_item in enumerate(schedule):
-            logger.debug(f"スケジュール項目 {i+1}/{len(schedule)} を処理中: {post_item}") # DEBUGログ追加
-            scheduled_time_utc = post_item["scheduled_time"]
-            logger.debug(f"  - 元のscheduled_time: {scheduled_time_utc} (型: {type(scheduled_time_utc)})") # DEBUGログ追加
-            
-            if not isinstance(scheduled_time_utc, datetime):
-                logger.warning(f"  - scheduled_timeがdatetime型ではありません。スキップします。 Item: {post_item}")
-                continue
-
-            # 念のため aware でなければ aware にする
-            if scheduled_time_utc.tzinfo is None:
-                logger.debug(f"  - scheduled_timeにタイムゾーン情報がないためUTCを付与します。") # DEBUGログ追加
-                scheduled_time_utc = scheduled_time_utc.replace(tzinfo=timezone.utc)
-            
-            logger.debug(f"  - 処理用scheduled_time_utc: {scheduled_time_utc.isoformat()} (タイムゾーン: {scheduled_time_utc.tzinfo})") # DEBUGログ追加
-
-            task_key = (post_item["account_id"], scheduled_time_utc.isoformat())
-            if task_key in executed_today_keys:
-                logger.debug(f"  - タスク {task_key} は既に実行済みのためスキップします。") # DEBUGログ追加
-                continue
-
-            # 現在時刻から見て、実行対象期間内か？
-            is_within_range = (time_range_start <= scheduled_time_utc <= time_range_end)
-            logger.debug(f"  - 実行期間判定: ({time_range_start.isoformat()} <= {scheduled_time_utc.isoformat()} <= {time_range_end.isoformat()}) = {is_within_range}") # DEBUGログ追加
-            
-            if is_within_range:
-                due_posts_count += 1
-                logger.info(f"実行対象タスク: {post_item['account_id']} @ {scheduled_time_utc.strftime('%H:%M:%S')}")
-                
-                returned_tweet_id: Optional[str] = None
-                success_flag: bool = False
-                error_reason_val: Optional[str] = "不明な実行エラー"
-                try:
-                    returned_tweet_id = self.post_executor.execute_post(post_item)
-                    if returned_tweet_id:
-                        successful_posts_count +=1
-                        success_flag = True
-                        error_reason_val = None 
+                    # ISO 8601形式の文字列をdatetimeオブジェクト（タイムゾーン情報付き）に変換
+                    if isinstance(time_str, str):
+                        # オプション: 'Z'で終わる古い形式にも対応
+                        if time_str.endswith('Z'):
+                            time_str = time_str[:-1] + '+00:00'
+                        last_times[acc_id] = datetime.fromisoformat(time_str)
                     else:
-                        # execute_postがNoneを返した場合、記事なし or 本文なし or APIキーなし等、またはツイート投稿失敗
-                        # 詳細な理由はexecutorのログや通知で記録されているはず
-                        error_reason_val = "投稿実行条件未達 (記事なし等) またはAPIエラー (Executorログ参照)" 
-                        logger.warning(f"タスク {task_key} は実行されましたが、投稿には至りませんでした (Tweet IDなし)。")
-                except Exception as e:
-                    logger.error(f"タスク {task_key} の実行中に予期せぬエラー: {e}", exc_info=True)
-                    error_reason_val = str(e)
-                    success_flag = False # 念のため
-                    # executor側で通知しているはずなので、ここでは重複通知を避けるか、より上位のエラーとして通知
-                finally:
-                    self._log_executed_post(post_item, success_flag, tweet_id=returned_tweet_id, error_reason=error_reason_val)
-            # else:
-                # logger.debug(f"タスク {task_key} は現在時刻の実行対象外です ({scheduled_time_utc.strftime('%H:%M:%S')} vs Now {now_utc.strftime('%H:%M:%S')}).")
-        
-        logger.info(f"{target_date.isoformat()} のスケジュール投稿処理完了。実行対象 {due_posts_count}件中、成功 {successful_posts_count}件。")
-        if self.workflow_notifier and due_posts_count > 0: # 何か実行試行があった場合のみ通知
-             self.workflow_notifier.send_simple_notification(
-                title=f"⚙️ 定時投稿処理完了 ({target_date.isoformat()})",
-                description=f"{due_posts_count}件の投稿を処理し、{successful_posts_count}件が成功しました。詳細はログを確認してください。",
-                color=0x0000ff if successful_posts_count == due_posts_count else (0xffa500 if successful_posts_count > 0 else 0xff0000)
-            )
+                        logger.warning(f"アカウント {acc_id} の最終投稿時刻 '{time_str}' の形式が不正です（文字列ではありません）。")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"アカウント {acc_id} の最終投稿時刻 '{time_str}' のパースに失敗しました。スキップします。エラー: {e}")
+            return last_times
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"最終投稿時刻ファイル '{self.last_post_times_path}' の読み込みに失敗しました: {e}", exc_info=True)
+            return {} # エラー発生時は空の辞書を返す
 
-    def process_scheduled_posts_for_day(self, date_str: str, process_now: bool = False) -> Tuple[int, int]:
-        logger.info(f"{date_str} のスケジュール投稿処理を{( '現在時刻ベースで' if process_now else '予定時刻通りに' )}開始します。")
-        
+    def _write_last_post_times(self, last_times: Dict[str, datetime]):
+        """最終投稿時刻をJSONファイルに書き込む。"""
+        serializable_data = {acc_id: dt.isoformat() for acc_id, dt in last_times.items()}
         try:
-            target_date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-            # スケジュールファイルから対象日のスケジュールを読み込む
-            posts_for_today: List[ScheduledPost] = self._load_schedule_from_file(target_date_obj)
-            
-            if not posts_for_today:
-                logger.info(f"{date_str} の投稿予定はありません。")
-                if self.summary_notifier: # スケジュールが無くても「予定なし」と通知する
-                    logger.info(f"{date_str} のスケジュールサマリーをDiscordに通知します（予定なし）。")
-                    self.summary_notifier.send_schedule_summary_notification([], date_str)
-                return 0, 0
-            
-            logger.info(f"{date_str} のスケジュール ({len(posts_for_today)}件) を {self.schedule_file_path} から読み込みました。") # self.post_scheduler.schedule_file_path から self.schedule_file_path に変更
+            with open(self.last_post_times_path, 'w', encoding='utf-8') as f:
+                json.dump(serializable_data, f, indent=4, ensure_ascii=False)
+        except IOError as e:
+            logger.error(f"最終投稿時刻ファイル '{self.last_post_times_path}' の書き込みに失敗しました: {e}", exc_info=True)
 
-            # === Discordへの日次スケジュールサマリー通知 ===
-            if self.summary_notifier:
-                logger.info(f"{date_str} のスケジュールサマリーをDiscordに通知します。")
-                try:
-                    self.summary_notifier.send_schedule_summary_notification(posts_for_today, date_str)
-                except Exception as e_notify:
-                    logger.error(f"Discordへの日次スケジュールサマリー通知中にエラー: {e_notify}", exc_info=True)
-            # === 通知処理ここまで ===
+    def launch_pending_posts(self):
+        """
+        [司令塔機能] 投稿時間になったアカウントを検出し、ワーカープロセスを起動する。
+        """
+        logger.info("司令塔プロセス開始: 投稿時間になったアカウントのワーカーを起動します。")
+        
+        interval_hours = self.config.get_post_interval_hours()
+        if not interval_hours:
+            logger.error("投稿間隔時間 (post_interval_hours) が設定されていないため、処理を中止します。")
+            return
 
-            # executed_today_count = 0 # この変数はここで初期化しても以降のループで再定義されるため不要か
-            successful_posts_count = 0
+        active_accounts = self.config.get_active_twitter_accounts()
+        if not active_accounts:
+            logger.info("処理対象のアクティブなアカウントがありません。")
+            return
 
-            already_executed_ids_for_day = set() # 初期化
-            if os.path.exists(self.executed_log_file_path):
-                try:
-                    with open(self.executed_log_file_path, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            try:
-                                log_entry = json.loads(line)
-                                # scheduled_timeはISO文字列なので、日付部分で比較
-                                if log_entry.get("success") and log_entry.get("scheduled_time", "").startswith(date_str):
-                                    # 実行済みIDの形式を ScheduledPost の scheduled_time (datetime オブジェクトのISO形式) に合わせる
-                                    # あるいは、より堅牢な一意のIDを ScheduledPost に持たせることを検討
-                                    # ここでは scheduled_time のISO文字列と account_id を使う
-                                    already_executed_ids_for_day.add((log_entry["account_id"], log_entry["scheduled_time"]))
-                            except json.JSONDecodeError:
-                                logger.debug(f"実行ログの不正な行をスキップ: {line.strip()}")
-                                continue
-                except Exception as e:
-                    logger.error(f"実行ログファイルの読み込みエラー（日次処理）: {e}", exc_info=True)
+        last_post_times = self._read_last_post_times()
+        now_utc = datetime.now(timezone.utc)
+        
+        accounts_to_post = []
+        for account in active_accounts:
+            account_id = account["account_id"]
+            last_post_time = last_post_times.get(account_id)
 
+            # 最終投稿時刻がない（初回）か、インターバル時間を超えていれば投稿対象
+            if not last_post_time or now_utc >= last_post_time + timedelta(hours=interval_hours):
+                accounts_to_post.append(account)
 
-            tasks_to_run = []
-            for post in posts_for_today:
-                # post['scheduled_time'] は _load_schedule_from_file により datetime オブジェクトのはず
-                task_key_for_check = (post['account_id'], post['scheduled_time'].isoformat())
-
-                if task_key_for_check in already_executed_ids_for_day:
-                    logger.info(f"タスク {post['account_id']} @ {post['scheduled_time'].isoformat()} は既に実行済みのためスキップします。")
-                    continue
-
-                scheduled_time_utc = post['scheduled_time'] # 既にUTCのdatetimeのはず
-                # 念のためタイムゾーン確認と付与 (load_schedule_from_file で付与されているはず)
-                if scheduled_time_utc.tzinfo is None:
-                    scheduled_time_utc = scheduled_time_utc.replace(tzinfo=timezone.utc)
-
-                now_utc = datetime.now(timezone.utc)
-
-                if process_now or scheduled_time_utc <= now_utc:
-                    tasks_to_run.append(post)
-                else:
-                    logger.info(f"タスク {post['account_id']} @ {scheduled_time_utc.strftime('%H:%M:%S UTC')} はまだ実行時刻ではありません。")
-            
-            logger.info(f"実行対象タスク (日次): {[(t['account_id'], t['scheduled_time'].isoformat()) for t in tasks_to_run]}")
-
-            for scheduled_post_data in tasks_to_run:
-                # executed_today_count += 1 # このカウントは len(tasks_to_run) で代替可能
-                returned_tweet_id: Optional[str] = None
-                success_flag: bool = False
-                error_reason_val: Optional[str] = "不明な実行エラー"
-                try:
-                    returned_tweet_id = self.post_executor.execute_post(scheduled_post_data)
-                    if returned_tweet_id:
-                        successful_posts_count += 1
-                        success_flag = True
-                        error_reason_val = None
-                    else: # Corrected indentation
-                        error_reason_val = "投稿実行条件未達 (記事なし等) またはAPIエラー (Executorログ参照)"
-                        logger.warning(f"タスク ({scheduled_post_data['account_id']}, {scheduled_post_data['scheduled_time'].isoformat()}) は実行されましたが、投稿には至りませんでした (Tweet IDなし)。")
-                except Exception as e:
-                    logger.error(f"タスク ({scheduled_post_data['account_id']}, {scheduled_post_data['scheduled_time'].isoformat()}) の日次実行中に予期せぬエラー: {e}", exc_info=True)
-                    error_reason_val = str(e)
-                    # success_flag は False のまま
-                finally:
-                    # _log_executed_post は ScheduledPost 型を期待する
-                    self._log_executed_post(scheduled_post_data, success_flag, tweet_id=returned_tweet_id, error_reason=error_reason_val)
-            
-            logger.info(f"{date_str} のスケジュール投稿処理完了。実行対象 {len(tasks_to_run)}件中、成功 {successful_posts_count}件。")
-            return len(tasks_to_run), successful_posts_count
-
-        except Exception as e:
-            logger.error(f"{date_str} のスケジュール投稿処理中に予期せぬエラー: {e}", exc_info=True)
-            return 0, 0 # エラー時は実行数0、成功数0として返す
-
-    def notify_workflow_completion(self, date_str: str, total_processed: int, total_successful: int):
-        # ... (既存のワークフロー完了通知メソッド)
-        # こちらは post_executor が個別の成功/失敗通知を行うので、重複を避けるか、サマリーに特化するか検討
-        # 現状は main.py から呼び出されている
-        if not self.config.get("auto_post_bot.discord_notification.enabled", False):
+        if not accounts_to_post:
+            logger.info("現時点で投稿対象となるアカウントはありません。")
+            # 投稿がない場合は通知しない
             return
         
-        # この通知は post_executor とは別に、WorkflowManager が完了を通知する想定
-        # ここでは summary_notifier を使う (post_executorが使うものと同じインスタンスでよいか、設定を分けるか)
-        if self.summary_notifier: # summary_notifierが初期化されていれば使う
-            title = f"⚙️ {date_str} バッチ処理完了"
-            description = f"処理対象タスク数: {total_processed}\n成功タスク数: {total_successful}"
-            color = 0x0000FF # 青色
-            if total_processed > 0 and total_successful < total_processed:
-                color = 0xFFA500 # オレンジ (一部失敗)
-            elif total_processed > 0 and total_successful == 0:
-                color = 0xFF0000 # 赤 (全失敗)
-            elif total_processed == 0:
-                color = 0x808080 # グレー (実行対象なし)
-            
-            self.summary_notifier.send_simple_notification(title, description, color=color)
-        else:
-            logger.info("Discord通知が無効か、またはsummary_notifierが初期化されていないため、ワークフロー完了通知をスキップします。")
+        # 投稿対象アカウントの最終投稿日時を先に更新（ロック）
+        for account in accounts_to_post:
+            last_post_times[account["account_id"]] = now_utc
+        self._write_last_post_times(last_post_times)
+        logger.info(f"{len(accounts_to_post)}件のアカウントの最終投稿日時を更新しました。")
 
-# ... (もし __main__ ブロックがあれば、ConfigインスタンスをWorkflowManagerに渡すように修正) 
+        # Discord通知
+        if self.notifier:
+            self._notify_status_to_discord(accounts_to_post, active_accounts)
+            
+        # ワーカープロセスを起動
+        for account in accounts_to_post:
+            account_id = account["account_id"]
+            try:
+                # 現在のPythonインタプリタを使ってmain.pyをワーカーとして逐次実行
+                # subprocess.Popenから.runに変更し、GitHub Actions上でワーカーが確実に実行完了するのを待つ
+                command = [
+                    sys.executable, 
+                    "main.py", 
+                    "--config", 
+                    self.config.config_path, # 親プロセスが使用したconfigパスをワーカーに引き継ぐ
+                    "--worker", 
+                    account_id
+                ]
+                logger.info(f"ワーカープロセスを起動します: `{' '.join(command)}`")
+                # check=Trueで、ワーカーがエラー終了した場合に例外を発生させる
+                subprocess.run(command, check=True) 
+            except Exception as e:
+                logger.error(f"ワーカープロセス `main.py --worker {account_id}` の実行に失敗: {e}", exc_info=True)
+                # 失敗しても次のアカウントの処理は続ける
+
+        logger.info(f"すべてのワーカー ({len(accounts_to_post)}件) の処理が完了しました。司令塔プロセスを終了します。")
+
+    def _notify_status_to_discord(self, accounts_to_post, active_accounts):
+        """現在の全アカウントのステータスをDiscordにテーブル形式で通知する。"""
+        if not self.notifier:
+            return
+            
+        jst = timezone(timedelta(hours=9), 'JST')
+        interval_hours = self.config.get_post_interval_hours()
+        title = f"🚀 {len(accounts_to_post)}件の並列投稿を開始"
+        headers = ["アカウント", "ステータス", "最終投稿 (JST)", "次回投稿予定 (JST)"]
+        table_data = []
+
+        # この時点での最新の最終投稿時刻を再読み込みして正確な情報を表示
+        current_last_post_times = self._read_last_post_times()
+
+        for account in active_accounts:
+            account_id = account["account_id"]
+            last_post_time_utc = current_last_post_times.get(account_id)
+            
+            is_posting_now = any(acc["account_id"] == account_id for acc in accounts_to_post)
+            
+            status = ""
+            if is_posting_now:
+                status = "▶️ 投稿開始"
+            elif last_post_time_utc:
+                status = "⏳ 待機中"
+            else:
+                status = "✅ 初回待機"
+
+            last_post_str = last_post_time_utc.astimezone(jst).strftime('%m-%d %H:%M') if last_post_time_utc else "─"
+            
+            next_post_str = "─"
+            if last_post_time_utc and interval_hours:
+                next_post_due_utc = last_post_time_utc + timedelta(hours=interval_hours)
+                next_post_str = next_post_due_utc.astimezone(jst).strftime('%m-%d %H:%M')
+            
+            table_data.append([f"`{account_id}`", status, f"`{last_post_str}`", f"`{next_post_str}`"])
+        
+        # 実行中のアカウントが先頭に来るようにソート
+        table_data.sort(key=lambda row: not row[1].startswith("▶️"))
+
+        self.notifier.send_status_table(
+            title=title,
+            headers=headers,
+            data=table_data,
+            color=0x2ECC71 # Green
+        )
+
+    def execute_worker_post(self, account_id: str):
+        """
+        [ワーカー機能] 指定されたアカウントIDの投稿処理を実際に実行する。
+        """
+        logger.info(f"--- ワーカー実行 (アカウントID: {account_id}) ---")
+        
+        account_details = self.config.get_active_twitter_account_details(account_id)
+        if not account_details:
+            logger.error(f"ワーカー処理失敗: アカウントID '{account_id}' が見つからないか、無効です。")
+            return
+
+        worksheet_name = account_details.get("spreadsheet_worksheet")
+        if not worksheet_name:
+            logger.error(f"ワーカー処理失敗: アカウント '{account_id}' にワークシート名が設定されていません。")
+            return
+
+        logger.info(f"投稿処理を実行します: Account='{account_id}', Worksheet='{worksheet_name}'")
+        
+        # ScheduledPostExecutorが期待する形式でデータを作成
+        # scheduled_timeはこのワーカーの実行時刻とする
+        scheduled_post: ScheduledPost = {
+            "account_id": account_id,
+            "scheduled_time": datetime.now(timezone.utc),
+            "worksheet_name": worksheet_name
+        }
+
+        try:
+            tweet_id = self.post_executor.execute_post(scheduled_post)
+            if tweet_id:
+                logger.info(f"ワーカー処理成功。アカウント '{account_id}' の投稿が完了しました。Tweet ID: {tweet_id}")
+            else:
+                # 投稿に至らなかった場合（例：投稿可能な記事がない）
+                logger.warning(f"ワーカー処理は正常に完了しましたが、アカウント '{account_id}' の投稿は実行されませんでした（条件未達）。")
+                # このケースではエラー通知は不要かもしれないので、ログレベルをWarningに留める
+        except Exception as e:
+            logger.error(f"ワーカー処理中に予期せぬエラーが発生しました (アカウント: {account_id}): {e}", exc_info=True)
+            if self.notifier:
+                self.notifier.send_simple_notification(
+                    title=f"⚠️ ワーカー処理失敗: `{account_id}`",
+                    description=f"アカウント `{account_id}` の投稿処理でエラーが発生しました。詳細はログを確認してください。",
+                    color=0xE74C3C # Red
+                )
+        finally:
+            logger.info(f"--- ワーカー完了 (アカウントID: {account_id}) ---")
+
+    def run_manual_test_post(self, account_id: str):
+        """
+        [手動テスト機能] 指定されたアカウントで投稿を1回実行する。最終投稿時刻は更新しない。
+        """
+        logger.info(f"--- 手動テストモード開始 (アカウントID: {account_id}) ---")
+
+        if self.notifier:
+            self.notifier.send_simple_notification(
+                title=f"🧪 手動テスト実行",
+                description=f"アカウント `{account_id}` のテスト投稿を開始します。",
+                color=0xFFA500 # Orange
+            )
+
+        account_details = self.config.get_active_twitter_account_details(account_id)
+        if not account_details:
+            logger.error(f"手動テスト失敗: 指定されたアカウントID '{account_id}' が見つからないか、無効化されています。")
+            return
+
+        worksheet_name = account_details.get("spreadsheet_worksheet")
+        if not worksheet_name:
+            logger.error(f"手動テスト失敗: アカウント '{account_id}' にワークシート名が設定されていません。")
+            return
+            
+        logger.info(f"テスト投稿を実行します: Account='{account_id}', Worksheet='{worksheet_name}'")
+        
+        scheduled_post: ScheduledPost = {
+            "account_id": account_id,
+            "scheduled_time": datetime.now(timezone.utc),
+            "worksheet_name": worksheet_name
+        }
+        
+        try:
+            tweet_id = self.post_executor.execute_post(scheduled_post)
+            if tweet_id:
+                logger.info(f"手動テスト投稿成功。Tweet ID: {tweet_id}")
+                if self.notifier:
+                    self.notifier.send_simple_notification(
+                        title=f"✅ 手動テスト成功: `{account_id}`",
+                        description=f"テスト投稿が成功しました。Tweet ID: {tweet_id}",
+                        color=0x2ECC71 # Green
+                    )
+            else:
+                logger.error("手動テスト投稿に失敗しました。詳細はログを確認してください。")
+                if self.notifier:
+                    self.notifier.send_simple_notification(
+                        title=f"❌ 手動テスト失敗: `{account_id}`",
+                        description=f"テスト投稿に失敗しました。投稿可能な記事がなかったか、APIエラーが発生した可能性があります。",
+                        color=0xE74C3C # Red
+                    )
+        except Exception as e:
+            logger.error(f"手動テスト中に予期せぬエラーが発生しました (アカウント: {account_id}): {e}", exc_info=True)
+            if self.notifier:
+                self.notifier.send_simple_notification(
+                    title=f"💥 手動テストで例外発生: `{account_id}`",
+                    description=f"詳細はログを確認してください。",
+                    color=0x992D22 # Dark Red
+                )
+        finally:
+            logger.info("最終投稿時刻ファイルは更新されませんでした（テストモードのため）。")
+            logger.info(f"--- 手動テストモード完了 (アカウントID: {account_id}) ---") 
