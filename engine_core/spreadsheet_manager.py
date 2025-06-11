@@ -136,12 +136,32 @@ class SpreadsheetManager:
     def update_post_status(self, worksheet_name: str, row_index: int, posted_at: datetime) -> bool:
         """
         指定されたワークシートの行について、投稿済み回数を1増やし、最終投稿日時を更新する。
+        列名（ヘッダー）を使って更新対象の列を特定する。
         """
         try:
             worksheet = self.gspread_client.open_by_key(self.spreadsheet_id).worksheet(worksheet_name)
             
+            # --- ヘッダー名から列のインデックスを動的に取得 ---
+            headers = worksheet.row_values(1)
+            
+            # 設定ファイルから抽象的な列名を取得
+            posted_count_col_name = self.columns[self._get_column_index("投稿済み回数") - 1]
+            last_posted_col_name = self.columns[self._get_column_index("最終投稿日時") - 1]
+
+            # ヘッダー名に一致する列のインデックス（1始まり）を探す
+            try:
+                posted_count_col_idx = headers.index(posted_count_col_name) + 1
+            except ValueError:
+                logger.error(f"ワークシート '{worksheet_name}' のヘッダーに列名 '{posted_count_col_name}' が見つかりません。")
+                return False
+            
+            try:
+                last_posted_col_idx = headers.index(last_posted_col_name) + 1
+            except ValueError:
+                logger.error(f"ワークシート '{worksheet_name}' のヘッダーに列名 '{last_posted_col_name}' が見つかりません。")
+                return False
+
             # "投稿済み回数" 列の現在の値を取得し、1増やす
-            posted_count_col_idx = self._get_column_index("投稿済み回数")
             current_posted_count_str = worksheet.cell(row_index, posted_count_col_idx).value
             if current_posted_count_str is None or str(current_posted_count_str).strip() == "":
                 current_posted_count = 0
@@ -153,9 +173,6 @@ class SpreadsheetManager:
                     current_posted_count = 0
             new_posted_count = current_posted_count + 1
 
-            # "最終投稿日時" 列を更新
-            last_posted_col_idx = self._get_column_index("最終投稿日時")
-            
             # posted_at をJSTに変換
             jst = timezone(timedelta(hours=9))
             posted_at_jst = posted_at.astimezone(jst)
